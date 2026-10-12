@@ -4,19 +4,22 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#3062f9">
-<title>heylivo – Nie wieder eine Frist verpassen</title>
-<meta name="description" content="Ausweis, TÜV, Versicherungen, Verträge, Arzttermine: Livo merkt sich deine Fristen und erinnert dich rechtzeitig. Einfach eintippen oder sagen: „Hey Livo …“">
+<title>heylivo</title>
+<meta name="description" content="heylivo – deadlines and reminders: ID card, car inspection, insurance, contracts, appointments. Just say “Hey Livo …”">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="../icon.png" type="image/png">
 <link rel="apple-touch-icon" href="../apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="heylivo">
-<link rel="stylesheet" href="style.css?v=9">
+<link rel="stylesheet" href="style.css?v=10">
 </head>
 <body>
 
 <header class="top">
-  <a class="wrap brand" href="../"><img src="../icon.png" alt=""><span class="wm">hey<span>livo</span></span></a>
+  <div class="wrap topbar">
+    <a class="brand" id="brand" href="../"><img src="../icon.png" alt=""><span class="wm">hey<span>livo</span></span></a>
+    <select id="langSel" class="langsel"></select>
+  </div>
 </header>
 
 <div class="wrap">
@@ -24,15 +27,16 @@
   <main id="list"></main>
 </div>
 
-<button class="fab" type="button" data-act="add" aria-label="Frist hinzufügen">+</button>
+<button class="fab" type="button" data-act="add" aria-label="+">+</button>
 <div class="sheet-bg" id="sheetBg" hidden></div>
 <section class="sheet" id="sheet" hidden></section>
 <div class="toast" id="toast" hidden></div>
 
-<script src="vendor/supabase.js?v=9"></script>
-<script src="templates.js?v=9"></script>
-<script src="voice.js?v=9"></script>
-<script src="push.js?v=9"></script>
-<script src="app.js?v=9"></script>
+<script src="i18n.js?v=10"></script>
+<script src="vendor/supabase.js?v=10"></script>
+<script src="templates.js?v=10"></script>
+<script src="voice.js?v=10"></script>
+<script src="push.js?v=10"></script>
+<script src="app.js?v=10"></script>
 </body>
 </html>

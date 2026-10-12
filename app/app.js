@@ -1,8 +1,9 @@
 // heylivo – Fristen in Supabase. Ohne Anmeldung bekommt jeder Browser ein
 // anonymes Konto; die Datenbank (RLS) zeigt jedem nur seine eigenen Fristen.
+// Alle Texte kommen aus i18n.js (t()), die Vorlagen-Texte aus templates.js.
 // URL-Parameter zum Testen: ?demo=1 zeigt Beispiel-Fristen (wird nicht gespeichert),
 // &show=add | voice | form:<vorlage> | item öffnet direkt das passende Blatt,
-// &say=<Satz> verarbeitet einen Satz so, als wäre er gesprochen worden.
+// &say=<Satz> verarbeitet einen Satz so, als wäre er gesprochen worden, &lang=en usw.
 
 var SUPABASE_URL = "https://fkhngrvqxlpqxpllrnoj.supabase.co";
 var SUPABASE_KEY = "sb_publishable_Ya83flK2efxCxi1WecSCwA_wbC_njXD"; // öffentlicher Schlüssel, darf im Code stehen
@@ -84,9 +85,7 @@ function canEdit() {
   return left === null || left >= 0;
 }
 function errText(e) {
-  return e && e.message === "trial_over"
-    ? "Deine " + TRIAL_DAYS + " Tage Testphase sind vorbei. Mit Livo Plus für 11,99 € im Jahr geht es weiter."
-    : "Das Speichern hat nicht geklappt. Bitte prüf deine Internetverbindung und versuch es nochmal.";
+  return e && e.message === "trial_over" ? t("err.trial", { n: TRIAL_DAYS }) : t("err.save");
 }
 
 /* ---------- Datum: immer lokale Mitternacht, gespeichert als JJJJ-MM-TT ---------- */
@@ -94,7 +93,8 @@ function pad(n) { return (n < 10 ? "0" : "") + n; }
 function today() { var d = new Date(); return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
 function toISO(d) { return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()); }
 function fromISO(s) { var p = String(s).split("-"); return new Date(+p[0], +p[1] - 1, +(p[2] || 1)); }
-function fmt(d) { return pad(d.getDate()) + "." + pad(d.getMonth() + 1) + "." + d.getFullYear(); }
+var DATE_FMT = new Intl.DateTimeFormat(LOCALE, { day: "2-digit", month: "2-digit", year: "numeric" });
+function fmt(d) { return DATE_FMT.format(d); }
 function addDays(d, n) { return new Date(d.getFullYear(), d.getMonth(), d.getDate() + n); }
 function addMonths(d, n) {
   // 31.01. + 1 Monat = 28./29.02., nicht 03.03.
@@ -104,8 +104,8 @@ function addMonths(d, n) {
 }
 function endOfMonth(ym) { var p = String(ym).split("-"); return new Date(+p[0], +p[1], 0); }
 function nextYearly(month, day) {
-  var t = today(), d = new Date(t.getFullYear(), month - 1, day);
-  return d < t ? new Date(t.getFullYear() + 1, month - 1, day) : d;
+  var t0 = today(), d = new Date(t0.getFullYear(), month - 1, day);
+  return d < t0 ? new Date(t0.getFullYear() + 1, month - 1, day) : d;
 }
 function diffDays(a, b) { return Math.round((b - a) / 86400000); }
 function isDate(d) { return d instanceof Date && !isNaN(d.getTime()); }
@@ -118,26 +118,24 @@ function status(it) {
   return { key: "later", days: days };
 }
 function whenText(days) {
-  if (days === 0) return "heute fällig";
-  if (days === 1) return "morgen fällig";
-  if (days === -1) return "seit gestern fällig";
-  if (days < 0) return "seit " + (-days) + " Tagen fällig";
-  if (days <= 60) return "in " + days + " Tagen";
+  if (days === 0) return t("when.today");
+  if (days === 1) return t("when.tomorrow");
+  if (days === -1) return t("when.yesterday");
+  if (days < 0) return t("when.overdue", { n: -days });
+  if (days <= 60) return t("when.days", { n: days });
   var m = Math.round(days / 30.44);
-  if (m < 24) return "in " + m + " Monaten";
-  return "in " + Math.round(days / 365.25) + " Jahren";
+  if (m < 24) return t("when.months", { n: m });
+  return t("when.years", { n: Math.round(days / 365.25) });
 }
 function everyText(m) {
-  if (!m) return "einmalig";
-  if (m === 1) return "jeden Monat";
-  if (m === 12) return "jedes Jahr";
-  if (m % 12 === 0) return "alle " + (m / 12) + " Jahre";
-  return "alle " + m + " Monate";
+  if (!m || m === 1 || m === 12) return t("every." + (m || 0));
+  if (m % 12 === 0) return t("every.years", { n: m / 12 });
+  return t("every.months", { n: m });
 }
-function dueText(it) { return fmt(fromISO(it.due)) + (it.time ? ", " + it.time + " Uhr" : ""); }
+function dueText(it) { return fmt(fromISO(it.due)) + (it.time ? ", " + it.time + t("time.suffix") : ""); }
 function remindText(it) {
   var r = addDays(fromISO(it.due), -it.lead);
-  return r <= today() ? "sofort" : "ab " + fmt(r);
+  return r <= today() ? t("remind.now") : t("remind.from", { date: fmt(r) });
 }
 function esc(s) {
   return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
@@ -147,27 +145,28 @@ function esc(s) {
 
 /* ---------- Nachschlagen ---------- */
 function find(list, id) { for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i]; return null; }
-function iconOf(it) { var t = find(TEMPLATES, it.tpl); return find(CATEGORIES, t ? t.cat : "own").icon; }
+function iconOf(it) { var tp = find(TEMPLATES, it.tpl); return find(CATEGORIES, tp ? tp.cat : "own").icon; }
 function sortedItems() {
   return items.slice().sort(function (a, b) { return a.due < b.due ? -1 : a.due > b.due ? 1 : 0; });
 }
 
 /* ---------- Liste ---------- */
-var VOICEBAR = '<button type="button" class="voicebar" data-act="voice"><span class="mic-ico">🎤</span>' +
-  '<span><b>Hey Livo …</b><small>Frist einfach sagen, z. B. „Mein Ausweis läuft im März 2027 ab“</small></span></button>';
+function voicebarHTML() {
+  return '<button type="button" class="voicebar" data-act="voice"><span class="mic-ico">🎤</span>' +
+    '<span><b>Hey Livo …</b><small>' + esc(t("voicebar.sub")) + '</small></span></button>';
+}
 
 // Zeile unter "Hey Livo": Stand der Testphase oder von Livo Plus
 function statusHTML() {
   if (DEMO) return "";
-  if (isPlus()) return '<p class="quota">Livo Plus aktiv bis ' + fmt(fromISO(plusUntil)) + '</p>';
+  if (isPlus()) return '<p class="quota">' + t("status.plus", { date: fmt(fromISO(plusUntil)) }) + '</p>';
   var left = trialDaysLeft();
-  if (left === null) return '<p class="quota"><b>' + TRIAL_DAYS + ' Tage kostenlos testen</b> – die Testphase startet mit deiner ersten Frist.</p>';
+  if (left === null) return '<p class="quota">' + t("status.trialStart", { n: TRIAL_DAYS }) + '</p>';
   if (left >= 0) {
-    return '<p class="quota">Testphase: ' + (left === 0 ? "<b>endet heute</b>" : "noch <b>" + left + (left === 1 ? " Tag" : " Tage") + "</b> kostenlos") +
+    return '<p class="quota">' + t("status.trial") + " " + (left === 0 ? t("status.today") : left === 1 ? t("status.left1") : t("status.left", { n: left })) +
       ' · <button type="button" class="linkbtn" data-act="plus">Livo Plus</button></p>';
   }
-  return '<button type="button" class="expired" data-act="plus"><b>Deine Testphase ist vorbei.</b> ' +
-    'Deine Fristen kannst du weiter ansehen. Zum Eintragen, Ändern und für Erinnerungen: <u>Livo Plus aktivieren</u></button>';
+  return '<button type="button" class="expired" data-act="plus">' + t("status.expired") + '</button>';
 }
 
 function render() {
@@ -176,27 +175,28 @@ function render() {
   var all = sortedItems();
   var now = all.filter(function (it) { return status(it).key !== "later"; });
   var later = all.filter(function (it) { return status(it).key === "later"; });
-  var html = (canEdit() ? VOICEBAR : "") + statusHTML() + pushHTML() + (now.length
-    ? '<h2 class="sec sec-now">Jetzt kümmern <span>' + now.length + '</span></h2>' + now.map(card).join("")
-    : '<div class="allgood">✅ Alles im Griff – gerade ist nichts fällig.</div>');
-  if (later.length) html += '<h2 class="sec">Alles im Blick</h2>' + later.map(card).join("");
+  var html = (canEdit() ? voicebarHTML() : "") + statusHTML() + pushHTML() + (now.length
+    ? '<h2 class="sec sec-now">' + t("sec.now") + ' <span>' + now.length + '</span></h2>' + now.map(card).join("")
+    : '<div class="allgood">' + t("allgood") + '</div>');
+  if (later.length) html += '<h2 class="sec">' + t("sec.later") + '</h2>' + later.map(card).join("");
   list.innerHTML = html;
 }
 function card(it) {
   var s = status(it);
-  var sub = s.key === "later" ? "Erinnerung " + remindText(it) : "fällig am " + dueText(it);
+  var sub = s.key === "later" ? t("card.remind", { x: remindText(it) }) : t("card.due", { x: dueText(it) });
   return '<button type="button" class="card st-' + s.key + '" data-open="' + it.id + '">' +
     '<span class="ico">' + iconOf(it) + '</span>' +
-    '<span class="txt"><b>' + esc(it.title) + '</b><small>' + sub + '</small></span>' +
-    '<span class="pill">' + whenText(s.days) + '</span></button>';
+    '<span class="txt"><b>' + esc(it.title) + '</b><small>' + esc(sub) + '</small></span>' +
+    '<span class="pill">' + esc(whenText(s.days)) + '</span></button>';
 }
 function emptyHTML() {
-  var quick = ["personalausweis", "tuev", "kfzversicherung", "zahnarzt", "rechnung", "versicherung"];
-  return '<div class="empty"><h1>Nie wieder eine Frist verpassen.</h1>' +
-    '<p>Sag Livo einfach, woran du denken musst – oder wähle eine Vorlage.</p>' + VOICEBAR + statusHTML() +
+  var quick = ["personalausweis", "tuev", "kfzversicherung", "zahnarzt", "rechnung", "versicherung", "arzttermin"];
+  var shown = quick.map(function (id) { return find(TEMPLATES, id); }).filter(function (tp) { return !tp.only || tp.only === LANG; }).slice(0, 6);
+  return '<div class="empty"><h1>' + t("empty.title") + '</h1>' +
+    '<p>' + t("empty.sub") + '</p>' + voicebarHTML() + statusHTML() +
     '<div class="chips">' +
-    quick.map(function (id) { return '<button type="button" class="chip" data-tpl="' + id + '">' + esc(find(TEMPLATES, id).title) + '</button>'; }).join("") +
-    '</div><button type="button" class="btn light" data-act="add">Alle Vorlagen ansehen</button></div>';
+    shown.map(function (tp) { return '<button type="button" class="chip" data-tpl="' + tp.id + '">' + esc(tplTitle(tp)) + '</button>'; }).join("") +
+    '</div><button type="button" class="btn light" data-act="add">' + t("empty.all") + '</button></div>';
 }
 
 /* ---------- Blatt von unten ---------- */
@@ -218,15 +218,17 @@ function closeSheet() {
 }
 
 function showPicker() {
-  var html = '<h3>Was möchtest du im Blick behalten?</h3>' +
-    '<button type="button" class="btn light" data-act="voice">🎤 Lieber sagen statt tippen</button>';
+  var html = '<h3>' + t("picker.title") + '</h3>' +
+    '<button type="button" class="btn light" data-act="voice">' + t("picker.voice") + '</button>';
+  var visible = visibleTemplates();
   CATEGORIES.forEach(function (c) {
-    var list = TEMPLATES.filter(function (t) { return t.cat === c.id; });
-    html += '<div class="cat">' + c.icon + " " + esc(c.name) + '</div><div class="tpls">' +
-      list.map(function (t) { return '<button type="button" class="tpl" data-tpl="' + t.id + '">' + esc(t.title) + '</button>'; }).join("") +
+    var list = visible.filter(function (tp) { return tp.cat === c.id; });
+    if (!list.length) return;
+    html += '<div class="cat">' + c.icon + " " + esc(catName(c)) + '</div><div class="tpls">' +
+      list.map(function (tp) { return '<button type="button" class="tpl" data-tpl="' + tp.id + '">' + esc(tplTitle(tp)) + '</button>'; }).join("") +
       '</div>';
   });
-  openSheet(html + '<button type="button" class="btn light" data-act="close">Abbrechen</button>');
+  openSheet(html + '<button type="button" class="btn light" data-act="close">' + t("cancel") + '</button>');
 }
 
 /* ---------- Spracheingabe: "Hey Livo" ---------- */
@@ -243,15 +245,14 @@ function stopListening() {
 
 function showVoice() {
   openSheet('<h3>🎤 Hey Livo</h3>' +
-    '<p class="muted">Sag einfach, worum es geht und wann – z. B. „Mein Ausweis läuft im März 2027 ab“ oder „Zahnarzt am 3. November um 10 Uhr“. ' +
-    'Livo hört zu, bis du kurz still bist – oder tipp aufs Mikrofon, wenn du fertig bist.</p>' +
+    '<p class="muted">' + esc(t("voice.intro")) + '</p>' +
     (Recognition
-      ? '<button type="button" class="mic" id="micBtn" aria-label="Sprechen">🎤</button>'
-      : '<p class="hint">Spracheingabe geht in diesem Browser nicht – in Chrome auf Android und in Safari auf dem iPhone schon. Du kannst den Satz aber hier eintippen.</p>') +
+      ? '<button type="button" class="mic" id="micBtn" aria-label="' + esc(t("voice.speak")) + '">🎤</button>'
+      : '<p class="hint">' + esc(t("voice.unsupported")) + '</p>') +
     '<p class="heard" id="heard"></p>' +
-    '<form class="sayform" id="sayForm"><input name="say" type="text" placeholder="… oder hier eintippen" autocomplete="off">' +
+    '<form class="sayform" id="sayForm"><input name="say" type="text" placeholder="' + esc(t("voice.type")) + '" autocomplete="off">' +
     '<button class="btn" type="submit">OK</button></form>' +
-    '<button type="button" class="btn light" data-act="close">Abbrechen</button>');
+    '<button type="button" class="btn light" data-act="close">' + t("cancel") + '</button>');
 
   pendingSaid = "";
   document.getElementById("sayForm").addEventListener("submit", function (e) {
@@ -277,18 +278,18 @@ function joinText(a, b) { return a && b ? a + " " + b : a || b; }
 function collect(results) {
   var text = "";
   for (var i = 0; i < results.length; i++) {
-    var t = results[i][0].transcript.trim();
-    if (!t) continue;
-    var lt = t.toLowerCase(), lx = text.toLowerCase();
-    if (lx && lt.indexOf(lx) === 0) text = t;
-    else if (lx.indexOf(lt) === -1) text = joinText(text, t);
+    var s = results[i][0].transcript.trim();
+    if (!s) continue;
+    var ls = s.toLowerCase(), lx = text.toLowerCase();
+    if (lx && ls.indexOf(lx) === 0) text = s;
+    else if (lx.indexOf(ls) === -1) text = joinText(text, s);
   }
   return text;
 }
 
 function listen(prompt) {
   var mic = document.getElementById("micBtn"), heard = document.getElementById("heard");
-  var session = {}, base = "", current = "", lastHeard = 0, started = Date.now(), finishing = false, timer = null;
+  var session = {}, base = "", current = "", lastHeard = 0, started = Date.now(), finishing = false, denied = false, timer = null;
   listening = session;
   function arm(ms) {
     clearTimeout(timer);
@@ -301,19 +302,20 @@ function listen(prompt) {
   };
   function round() {
     var r = new Recognition();
-    r.lang = "de-DE";
+    r.lang = LOCALE;
     r.interimResults = true;
     r.continuous = true;
     r.onresult = function (e) {
       current = collect(e.results);
       lastHeard = Date.now();
-      heard.textContent = "„" + joinText(pendingSaid, joinText(base, current)) + "“";
+      heard.textContent = quote(joinText(pendingSaid, joinText(base, current)));
       arm(SILENCE_MS);
     };
     r.onerror = function (e) {
       if (e.error === "not-allowed" || e.error === "service-not-allowed") {
         finishing = true;
-        heard.textContent = "Das Mikrofon ist nicht erlaubt. Bitte im Browser erlauben – oder den Satz eintippen.";
+        denied = true;
+        heard.textContent = t("voice.denied");
       }
     };
     r.onend = function () {
@@ -330,13 +332,13 @@ function listen(prompt) {
       clearTimeout(timer);
       mic.classList.remove("on");
       if (base) understand(base, true);
-      else if (heard.textContent.indexOf("Mikrofon ist nicht erlaubt") < 0) heard.textContent = "Ich habe nichts gehört. Tipp nochmal aufs Mikrofon.";
+      else if (!denied) heard.textContent = t("voice.nothing");
     };
     rec = r;
     r.start();
   }
   mic.classList.add("on");
-  heard.textContent = prompt || "Ich höre zu …";
+  heard.textContent = prompt || t("voice.listening");
   arm(FIRST_WORD_MS);
   try { round(); } catch (e) { rec = null; listening = null; mic.classList.remove("on"); }
 }
@@ -347,7 +349,7 @@ function understand(text, spoken) {
   // Gesprochen, aber noch ohne Datum (oft eine Pause vor dem Datum): nachfragen und weiter zuhören
   if (!d.due && spoken && !pendingSaid && document.getElementById("micBtn")) {
     pendingSaid = full;
-    listen("„" + full + "“ – Wann? Sag zum Beispiel „am 3. November“.");
+    listen(t("voice.when", { said: quote(full) }));
     return;
   }
   pendingSaid = "";
@@ -355,8 +357,9 @@ function understand(text, spoken) {
 }
 
 /* ---------- Formular für eine Frist (Bestätigen, Bearbeiten, Erneuern) ---------- */
+function opt() { return ' <i>' + t("optional") + '</i>'; }
 function leadHTML(val) {
-  return '<label class="field"><span>Erinnern – wie viele Tage vorher?</span>' +
+  return '<label class="field"><span>' + t("form.lead") + '</span>' +
     '<input name="lead" type="number" min="0" max="365" inputmode="numeric" value="' + val + '"></label>';
 }
 function readLead(form, def) {
@@ -365,14 +368,19 @@ function readLead(form, def) {
 }
 // Uhrzeit und "kurz vorher erinnern" - die Auswahl erscheint erst, wenn eine Uhrzeit drin ist.
 // remindMin: undefined = neue Frist (Vorschlag 15 Min.), 0 = ausdrücklich keine.
-var SOON_OPTIONS = [[5, "5 Minuten vorher"], [15, "15 Minuten vorher"], [30, "30 Minuten vorher"], [60, "1 Stunde vorher"], [120, "2 Stunden vorher"], [0, "Nein"]];
+var SOON_VALUES = [5, 15, 30, 60, 120, 0];
 var SOON_DEFAULT = 15;
+function soonText(min) {
+  if (!min) return t("soon.no");
+  if (min === 60) return t("soon.hour");
+  return min > 60 ? t("soon.hours", { n: min / 60 }) : t("soon.min", { n: min });
+}
 function timeHTML(time, remindMin) {
   var selected = remindMin == null ? SOON_DEFAULT : remindMin;
-  return '<label class="field"><span>Uhrzeit <i>(optional)</i></span><input name="time" type="time" value="' + esc(time || "") + '"></label>' +
-    '<label class="field" id="soonField"' + (time ? "" : " hidden") + '><span>Kurz vorher erinnern</span><select name="soon">' +
-    SOON_OPTIONS.map(function (o) {
-      return '<option value="' + o[0] + '"' + (o[0] === selected ? " selected" : "") + '>' + o[1] + '</option>';
+  return '<label class="field"><span>' + t("form.time") + opt() + '</span><input name="time" type="time" value="' + esc(time || "") + '"></label>' +
+    '<label class="field" id="soonField"' + (time ? "" : " hidden") + '><span>' + t("form.soon") + '</span><select name="soon">' +
+    SOON_VALUES.map(function (v) {
+      return '<option value="' + v + '"' + (v === selected ? " selected" : "") + '>' + esc(soonText(v)) + '</option>';
     }).join("") + '</select></label>';
 }
 function wireTime(form) {
@@ -383,28 +391,25 @@ function wireTime(form) {
 function readSoon(form) {
   return form.elements.time.value ? (parseInt(form.elements.soon.value, 10) || 0) : 0;
 }
-function soonText(min) {
-  return min >= 60 ? (min / 60) + (min === 60 ? " Stunde" : " Stunden") + " vorher" : min + " Minuten vorher";
-}
 
 function itemFormHTML(it, opts) {
   var list = EVERY_OPTIONS.slice();
   if (!list.some(function (o) { return o[0] === it.every; })) list.push([it.every, everyText(it.every)]);
   return '<form id="frm" novalidate>' + (opts.intro || "") +
-    '<label class="field"><span>Was?</span><input name="title" type="text" value="' + esc(it.title) + '"></label>' +
-    '<label class="field"><span>' + (opts.dateLabel || "Fällig am") + '</span><input name="due" type="date" value="' + esc(it.due) + '"></label>' +
+    '<label class="field"><span>' + t("form.what") + '</span><input name="title" type="text" value="' + esc(it.title) + '"></label>' +
+    '<label class="field"><span>' + (opts.dateLabel || t("form.due")) + '</span><input name="due" type="date" value="' + esc(it.due) + '"></label>' +
     timeHTML(it.time, it.remindMin) +
-    '<label class="field"><span>Wiederholung</span><select name="every">' + list.map(function (o) {
+    '<label class="field"><span>' + t("form.every") + '</span><select name="every">' + list.map(function (o) {
       return '<option value="' + o[0] + '"' + (o[0] === it.every ? " selected" : "") + '>' + esc(o[1]) + '</option>';
     }).join("") + '</select></label>' +
     leadHTML(it.lead) +
-    '<p class="err" id="err"></p><button class="btn" type="submit">Speichern</button>' + (opts.back || "") + '</form>';
+    '<p class="err" id="err"></p><button class="btn" type="submit">' + t("save") + '</button>' + (opts.back || "") + '</form>';
 }
 // Liest das Formular in "it" ein; false, wenn Titel oder Datum fehlen
 function readItemForm(form, it) {
   var title = form.elements.title.value.trim(), due = form.elements.due.value;
   if (!title || !due || !isDate(fromISO(due))) {
-    document.getElementById("err").textContent = "Bitte trag ein, was es ist und ein gültiges Datum.";
+    document.getElementById("err").textContent = t("form.err");
     return false;
   }
   it.title = title;
@@ -417,20 +422,19 @@ function readItemForm(form, it) {
 }
 
 function showDraft(d, said) {
-  var t = find(TEMPLATES, d.tpl);
-  openSheet('<h3>' + find(CATEGORIES, t.cat).icon + ' Habe ich das richtig verstanden?</h3>' +
-    '<p class="said">„' + esc(said) + '“</p>' +
+  var tp = find(TEMPLATES, d.tpl), hint = tplHint(tp);
+  openSheet('<h3>' + find(CATEGORIES, tp.cat).icon + ' ' + t("draft.title") + '</h3>' +
+    '<p class="said">' + esc(quote(said)) + '</p>' +
     itemFormHTML(d, {
-      intro: (d.due ? "" : '<p class="err">Das Datum habe ich nicht verstanden – bitte unten eintragen.</p>') +
-        (t.hint ? '<p class="hint">' + esc(t.hint) + '</p>' : ""),
-      back: '<button class="btn light" type="button" data-act="voice">Nochmal sagen</button>'
+      intro: (d.due ? "" : '<p class="err">' + t("draft.noDate") + '</p>') + (hint ? '<p class="hint">' + esc(hint) + '</p>' : ""),
+      back: '<button class="btn light" type="button" data-act="voice">' + t("draft.again") + '</button>'
     }));
   var form = document.getElementById("frm");
   wireTime(form);
   form.addEventListener("submit", function (e) {
     e.preventDefault();
     if (!readItemForm(form, d)) return;
-    saving(form, addItem(d), "Gespeichert ✓ Erinnerung " + remindText(d));
+    saving(form, addItem(d), t("saved", { x: remindText(d) }));
   });
 }
 
@@ -438,7 +442,7 @@ function showDraft(d, said) {
 async function saving(form, promise, okText) {
   var btn = form.querySelector("[type=submit]");
   btn.disabled = true;
-  btn.textContent = "Speichert …";
+  btn.textContent = t("saving");
   try {
     await promise;
     closeSheet(); render();
@@ -446,13 +450,13 @@ async function saving(form, promise, okText) {
   } catch (err) {
     document.getElementById("err").textContent = errText(err);
     btn.disabled = false;
-    btn.textContent = "Speichern";
+    btn.textContent = t("save");
   }
 }
 
 /* ---------- Neue Frist aus einer Vorlage ---------- */
-function fieldHTML(f) {
-  var v = f.value != null ? f.value : "";
+function fieldHTML(tp, f) {
+  var v = f.value != null ? f.value : "", ph = fieldPh(tp, f);
   var input;
   if (f.type === "select") {
     input = '<select name="' + f.key + '">' + f.options.map(function (o) {
@@ -461,41 +465,41 @@ function fieldHTML(f) {
   } else if (f.type === "months") {
     input = '<input name="' + f.key + '" type="number" min="1" max="120" inputmode="numeric" value="' + esc(v) + '">';
   } else {
-    input = '<input name="' + f.key + '" type="' + f.type + '" value="' + esc(v) + '"' +
-      (f.placeholder ? ' placeholder="' + esc(f.placeholder) + '"' : "") + '>';
+    input = '<input name="' + f.key + '" type="' + f.type + '" value="' + esc(v) + '"' + (ph ? ' placeholder="' + esc(ph) + '"' : "") + '>';
   }
-  return '<label class="field"><span>' + esc(f.label) + (f.optional ? " <i>(optional)</i>" : "") + '</span>' + input + '</label>';
+  return '<label class="field"><span>' + esc(fieldLabel(tp, f)) + (f.optional ? opt() : "") + '</span>' + input + '</label>';
 }
-function readValues(form, t) {
+function readValues(form, tp) {
   var v = {};
-  t.fields.forEach(function (f) { v[f.key] = (form.elements[f.key].value || "").trim(); });
+  tp.fields.forEach(function (f) { v[f.key] = (form.elements[f.key].value || "").trim(); });
   return v;
 }
 // Liefert die fertige Frist oder null, wenn Pflichtfelder fehlen oder das Datum ungültig ist
-function build(t, v, lead) {
-  if (t.fields.some(function (f) { return !f.optional && !v[f.key]; })) return null;
-  var r = t.compute(v);
+function build(tp, v, lead) {
+  if (tp.fields.some(function (f) { return !f.optional && !v[f.key]; })) return null;
+  var r = tp.compute(v);
   if (!isDate(r.due)) return null;
-  return { tpl: t.id, title: t.name ? t.name(v) : t.title, due: toISO(r.due), time: "", every: r.every || 0, from: t.from || "due", lead: lead, renew: !!t.renew };
+  return { tpl: tp.id, title: tplName(tp, v), due: toISO(r.due), time: "", every: r.every || 0, from: tp.from || "due", lead: lead, renew: !!tp.renew };
 }
 
 function showNew(tid) {
-  var t = find(TEMPLATES, tid);
-  if (!t) return;
-  openSheet('<h3>' + find(CATEGORIES, t.cat).icon + " " + esc(t.title) + '</h3><form id="frm" novalidate>' +
-    (t.hint ? '<p class="hint">' + esc(t.hint) + '</p>' : "") +
-    t.fields.map(fieldHTML).join("") +
+  var tp = find(TEMPLATES, tid);
+  if (!tp) return;
+  var hint = tplHint(tp);
+  openSheet('<h3>' + find(CATEGORIES, tp.cat).icon + " " + esc(tplTitle(tp)) + '</h3><form id="frm" novalidate>' +
+    (hint ? '<p class="hint">' + esc(hint) + '</p>' : "") +
+    tp.fields.map(function (f) { return fieldHTML(tp, f); }).join("") +
     timeHTML("", undefined) +
-    leadHTML(t.lead) +
+    leadHTML(tp.lead) +
     '<div class="preview" id="pv"></div><p class="err" id="err"></p>' +
-    '<button class="btn" type="submit">Speichern</button>' +
-    '<button class="btn light" type="button" data-act="add">Zurück</button></form>');
+    '<button class="btn" type="submit">' + t("save") + '</button>' +
+    '<button class="btn light" type="button" data-act="add">' + t("back") + '</button></form>');
 
   var form = document.getElementById("frm");
   wireTime(form);
   // Frist aus den Feldern der Vorlage plus der (freiwilligen) Uhrzeit
   function current() {
-    var it = build(t, readValues(form, t), readLead(form, t.lead));
+    var it = build(tp, readValues(form, tp), readLead(form, tp.lead));
     if (it) {
       it.time = form.elements.time.value || "";
       it.remindMin = readSoon(form);
@@ -505,15 +509,15 @@ function showNew(tid) {
   function update() {
     var it = current();
     document.getElementById("pv").innerHTML = it
-      ? 'Fällig am <b>' + dueText(it) + '</b> · Erinnerung <b>' + remindText(it) + '</b> · ' + everyText(it.every)
-      : "Fällig am … – bitte die Felder ausfüllen.";
+      ? t("preview", { due: esc(dueText(it)), remind: esc(remindText(it)), every: esc(everyText(it.every)) })
+      : t("preview.empty");
   }
   form.addEventListener("input", update);
   form.addEventListener("submit", function (e) {
     e.preventDefault();
     var it = current();
-    if (!it) { document.getElementById("err").textContent = "Bitte fülle die Pflichtfelder mit einem gültigen Datum aus."; return; }
-    saving(form, addItem(it), "Gespeichert ✓ Erinnerung " + remindText(it));
+    if (!it) { document.getElementById("err").textContent = t("form.errFields"); return; }
+    saving(form, addItem(it), t("saved", { x: remindText(it) }));
   });
   update();
 }
@@ -522,20 +526,20 @@ function showNew(tid) {
 function showItem(id) {
   var it = find(items, id);
   if (!it) return;
-  var s = status(it), t = find(TEMPLATES, it.tpl);
-  var main = it.every > 0 ? "Erledigt – nächster Termin" : it.renew ? "Erneuert – neues Datum eintragen" : "Erledigt";
+  var s = status(it), tp = find(TEMPLATES, it.tpl), hint = tp ? tplHint(tp) : "";
+  var main = it.every > 0 ? t("done.next") : it.renew ? t("done.renew") : t("done");
   openSheet('<div class="st-' + s.key + '"><div class="d-head"><span class="ico">' + iconOf(it) + '</span><div><h3>' + esc(it.title) + '</h3>' +
-    '<span class="pill">' + whenText(s.days) + '</span></div></div>' +
-    '<dl><dt>Fällig am</dt><dd>' + dueText(it) + '</dd>' +
-    '<dt>Erinnerung</dt><dd>' + it.lead + ' Tage vorher (' + remindText(it) + ')</dd>' +
-    (it.time && it.remindMin ? '<dt>Kurz vorher</dt><dd>' + soonText(it.remindMin) + '</dd>' : "") +
-    '<dt>Wiederholung</dt><dd>' + everyText(it.every) + '</dd></dl>' +
-    (t && t.hint ? '<p class="hint">' + esc(t.hint) + '</p>' : "") +
+    '<span class="pill">' + esc(whenText(s.days)) + '</span></div></div>' +
+    '<dl><dt>' + t("dl.due") + '</dt><dd>' + esc(dueText(it)) + '</dd>' +
+    '<dt>' + t("dl.remind") + '</dt><dd>' + esc(t("dl.remindVal", { n: it.lead, x: remindText(it) })) + '</dd>' +
+    (it.time && it.remindMin ? '<dt>' + t("dl.soon") + '</dt><dd>' + esc(soonText(it.remindMin)) + '</dd>' : "") +
+    '<dt>' + t("dl.every") + '</dt><dd>' + esc(everyText(it.every)) + '</dd></dl>' +
+    (hint ? '<p class="hint">' + esc(hint) + '</p>' : "") +
     (canEdit()
       ? '<button type="button" class="btn" data-act="done" data-id="' + it.id + '">' + main + '</button>' +
-        '<button type="button" class="btn light" data-act="edit" data-id="' + it.id + '">Bearbeiten</button>'
-      : '<button type="button" class="btn" data-act="plus">Livo Plus aktivieren, um zu ändern</button>') +
-    '<button type="button" class="btn danger" data-act="del" data-id="' + it.id + '">Löschen</button></div>');
+        '<button type="button" class="btn light" data-act="edit" data-id="' + it.id + '">' + t("edit") + '</button>'
+      : '<button type="button" class="btn" data-act="plus">' + t("plus.toEdit") + '</button>') +
+    '<button type="button" class="btn danger" data-act="del" data-id="' + it.id + '">' + t("delete") + '</button></div>');
 }
 
 async function markDone(id) {
@@ -549,13 +553,13 @@ async function markDone(id) {
       it.due = toISO(next);
       try { await updateItem(it); } catch (e) { it.due = old; throw e; }
       closeSheet(); render();
-      toast("Erledigt ✓ Nächster Termin: " + fmt(next));
+      toast(t("toast.doneNext", { date: fmt(next) }));
     } else if (it.renew) {
       showEdit(id, true);
     } else {
       await deleteItem(id);
       closeSheet(); render();
-      toast("Erledigt ✓");
+      toast(t("toast.done"));
     }
   } catch (e) {
     toast(errText(e));
@@ -566,11 +570,11 @@ function showEdit(id, renewing) {
   var it = find(items, id);
   if (!it) return;
   var view = renewing ? Object.assign({}, it, { due: "" }) : it;
-  openSheet('<h3>' + (renewing ? "Neues Datum eintragen" : "Bearbeiten") + '</h3>' +
+  openSheet('<h3>' + (renewing ? t("edit.renewTitle") : t("edit")) + '</h3>' +
     itemFormHTML(view, {
-      intro: renewing ? '<p class="hint">Trag das neue „Gültig bis“-Datum ein – dann erinnert Livo dich beim nächsten Mal wieder rechtzeitig.</p>' : "",
-      dateLabel: renewing ? "Neu gültig bis" : "Fällig am",
-      back: '<button class="btn light" type="button" data-open="' + it.id + '">Zurück</button>'
+      intro: renewing ? '<p class="hint">' + esc(t("edit.renewHint")) + '</p>' : "",
+      dateLabel: renewing ? t("edit.renewLabel") : t("form.due"),
+      back: '<button class="btn light" type="button" data-open="' + it.id + '">' + t("back") + '</button>'
     }));
   var form = document.getElementById("frm");
   wireTime(form);
@@ -578,14 +582,14 @@ function showEdit(id, renewing) {
     e.preventDefault();
     var before = Object.assign({}, it);
     if (!readItemForm(form, it)) return;
-    saving(form, updateItem(it).catch(function (err) { Object.assign(it, before); throw err; }), "Gespeichert ✓");
+    saving(form, updateItem(it).catch(function (err) { Object.assign(it, before); throw err; }), t("saved.plain"));
   });
 }
 
 async function removeItem(id) {
   var it = find(items, id);
   if (!it) return;
-  if (!confirm("„" + it.title + "“ wirklich löschen?")) return;
+  if (!confirm(t("confirm.delete", { title: it.title }))) return;
   try {
     await deleteItem(id);
     closeSheet(); render();
@@ -598,31 +602,28 @@ async function removeItem(id) {
 function showPlus() {
   var over = !canEdit();
   var buyUrl = PLUS_LINK && userId && !DEMO
-    ? PLUS_LINK + "?client_reference_id=" + encodeURIComponent(userId) + "&locale=de" : "";
-  openSheet('<h3>' + (over ? "Deine " + TRIAL_DAYS + " Tage Testphase sind vorbei" : isPlus() ? "Livo Plus ist aktiv" : "Livo Plus") + '</h3>' +
-    (isPlus() ? '<p class="muted">Aktiv bis <b>' + fmt(fromISO(plusUntil)) + '</b>. Ein weiterer Kauf verlängert um ein Jahr ab diesem Datum.</p>' : "") +
-    '<p class="hint"><b>Livo Plus – 11,99 € inkl. MwSt. für 1 Jahr</b> (weniger als 1 € im Monat)<br>' +
-    '✓ Unbegrenzt viele Fristen<br>✓ Erinnerungen aufs Handy<br>✓ Eintragen per Sprache: „Hey Livo …“<br>✓ Erledigen, ändern, erneuern</p>' +
-    (over ? '<p class="muted">Deine bisherigen Fristen bleiben erhalten und du kannst sie weiter ansehen.</p>' : "") +
+    ? PLUS_LINK + "?client_reference_id=" + encodeURIComponent(userId) + "&locale=" + LANG : "";
+  openSheet('<h3>' + (over ? t("plus.over", { n: TRIAL_DAYS }) : isPlus() ? t("plus.active") : "Livo Plus") + '</h3>' +
+    (isPlus() ? '<p class="muted">' + t("plus.until", { date: fmt(fromISO(plusUntil)) }) + '</p>' : "") +
+    '<p class="hint">' + t("plus.offer") + '</p>' +
+    (over ? '<p class="muted">' + t("plus.kept") + '</p>' : "") +
     (buyUrl
-      ? '<a class="btn" href="' + esc(buyUrl) + '">' + (isPlus() ? "Um 1 Jahr verlängern – 11,99 €" : "Livo Plus kaufen – 11,99 €") + '</a>' +
-        '<p class="legal">Einmalzahlung, verlängert sich nicht automatisch. Livo Plus gilt für die Fristen in diesem Browser. ' +
-        'Es gelten unsere <a href="../agb.html" target="_blank">AGB</a> (mit Widerrufsbelehrung) und die <a href="../datenschutz.html" target="_blank">Datenschutzerklärung</a>. ' +
-        'Bezahlt wird sicher über Stripe.</p>'
-      : '<button type="button" class="btn" disabled>Livo Plus kommt bald</button>') +
+      ? '<a class="btn" href="' + esc(buyUrl) + '">' + (isPlus() ? t("plus.extend") : t("plus.buy")) + '</a>' +
+        '<p class="legal">' + t("plus.legal") + '</p>'
+      : '<button type="button" class="btn" disabled>' + t("plus.soon") + '</button>') +
     '<button type="button" class="btn light" data-act="close">OK</button>');
 }
 
 // Rückkehr von Stripe (?plus=danke): kurz warten, bis der Webhook Plus eingetragen hat
 async function afterPurchase() {
   history.replaceState(null, "", location.pathname);
-  toast("Danke! Livo Plus wird freigeschaltet …");
+  toast(t("toast.thanks"));
   for (var i = 0; i < 10 && !isPlus(); i++) {
     await new Promise(function (resolve) { setTimeout(resolve, 2000); });
     try { await loadAll(); } catch (e) { /* nächster Versuch */ }
   }
   render();
-  toast(isPlus() ? "Livo Plus ist aktiv bis " + fmt(fromISO(plusUntil)) + " ✓" : "Die Zahlung ist da – Plus erscheint gleich. Lade die Seite in einer Minute neu.");
+  toast(isPlus() ? t("toast.plusActive", { date: fmt(fromISO(plusUntil)) }) : t("toast.plusPending"));
 }
 
 /* ---------- Kurze Meldung ---------- */
@@ -649,10 +650,10 @@ document.addEventListener("click", function (e) {
     el.disabled = true;
     enablePush().then(function (ok) {
       render();
-      toast(ok ? "Erinnerungen sind an ✓" : pushState === "blocked" ? "Benachrichtigungen sind blockiert." : "Erinnerungen wurden nicht eingeschaltet.");
+      toast(ok ? t("toast.pushOn") : pushState === "blocked" ? t("toast.pushBlocked") : t("toast.pushOff"));
     }, function () {
       render();
-      toast("Das hat nicht geklappt. Bitte nochmal versuchen.");
+      toast(t("toast.retry"));
     });
     return;
   }
@@ -668,39 +669,53 @@ document.addEventListener("keydown", function (e) { if (e.key === "Escape") clos
 
 /* ---------- Beispiel-Fristen zum Ausprobieren ---------- */
 function seedDemo() {
-  var t = today();
+  var t0 = today();
   function add(tid, v) {
-    var tp = find(TEMPLATES, tid), it = build(tp, v, tp.lead);
+    var tp = find(TEMPLATES, tid);
+    if (tp.only && tp.only !== LANG) return;
+    var it = build(tp, v, tp.lead);
     it.id = uid();
     items.push(it);
   }
   items = [];
-  add("rechnung", { what: "Stadtwerke", date: toISO(addDays(t, 2)) });
-  add("personalausweis", { date: toISO(addDays(t, 58)) });
-  add("inspektion", { date: toISO(addDays(t, -4)) });
-  add("handy", { what: "Telekom", start: toISO(addMonths(t, -23)), term: "24" });
+  add("rechnung", { what: demoWord("bill"), date: toISO(addDays(t0, 2)) });
+  add("personalausweis", { date: toISO(addDays(t0, 58)) });
+  add("inspektion", { date: toISO(addDays(t0, -4)) });
+  add("handy", { what: demoWord("phone"), start: toISO(addMonths(t0, -23)), term: "24" });
   add("kfzversicherung", {});
-  add("zahnarzt", { date: toISO(addMonths(t, -5)) });
-  add("tuev", { month: toISO(addMonths(t, 7)).slice(0, 7) });
+  add("zahnarzt", { date: toISO(addMonths(t0, -5)) });
+  add("tuev", { month: toISO(addMonths(t0, 7)).slice(0, 7) });
   add("steuer", {});
-  add("reisepass", { date: toISO(addMonths(t, 26)) });
+  add("reisepass", { date: toISO(addMonths(t0, 26)) });
+}
+
+/* ---------- Sprache oben rechts ---------- */
+function setupLanguage() {
+  var sel = document.getElementById("langSel");
+  if (!sel) return;
+  sel.setAttribute("aria-label", t("lang"));
+  sel.innerHTML = Object.keys(LANGS).map(function (code) {
+    return '<option value="' + code + '"' + (code === LANG ? " selected" : "") + '>' + esc(LANGS[code]) + '</option>';
+  }).join("");
+  sel.addEventListener("change", function () { setLang(sel.value); });
+  document.querySelector(".fab").setAttribute("aria-label", t("add"));
+  document.getElementById("brand").href = LANG === "de" ? "../" : "../en/";
 }
 
 /* ---------- Start ---------- */
 async function start() {
   var list = document.getElementById("list");
-  document.getElementById("note").textContent = DEMO
-    ? "Demo mit Beispiel-Fristen – hier wird nichts gespeichert."
-    : "Beta: Deine Fristen werden sicher gespeichert – ohne Anmeldung, in diesem Browser.";
+  setupLanguage();
+  document.getElementById("note").textContent = DEMO ? t("note.demo") : t("note.beta");
   if (DEMO) {
     seedDemo();
   } else {
-    list.innerHTML = '<p class="loading">Lädt …</p>';
+    list.innerHTML = '<p class="loading">' + t("loading") + '</p>';
     try {
       await signIn();
       await loadAll();
     } catch (e) {
-      list.innerHTML = '<p class="offline">Keine Verbindung. Bitte prüf dein Internet und lade die Seite neu.</p>';
+      list.innerHTML = '<p class="offline">' + t("offline") + '</p>';
       return;
     }
     try { localStorage.removeItem("livo.items.v1"); } catch (e) {} // Fristen aus dem ersten Prototyp

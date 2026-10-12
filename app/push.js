@@ -40,7 +40,7 @@ async function initPush() {
 async function saveSubscription(sub) {
   var j = sub.toJSON();
   var r = await sb.from("push_subscriptions").upsert(
-    { endpoint: j.endpoint, p256dh: j.keys.p256dh, auth_key: j.keys.auth },
+    { endpoint: j.endpoint, p256dh: j.keys.p256dh, auth_key: j.keys.auth, lang: LANG },
     { onConflict: "endpoint" }
   );
   if (r.error) throw r.error;
@@ -86,18 +86,11 @@ function pushHTML() {
   if (DEMO || !items.length || !canEdit()) return "";
   if (pushState === "off") {
     return '<button type="button" class="pushcard" data-act="push"><span class="mic-ico">🔔</span>' +
-      '<span><b>Erinnerungen einschalten</b><small>Livo meldet sich von selbst, wenn eine Frist näher rückt.</small></span></button>';
+      '<span><b>' + t("push.card") + '</b><small>' + t("push.cardSub") + '</small></span></button>';
   }
-  if (pushState === "ios-install") {
-    return '<div class="pushinfo"><b>🔔 Erinnerungen auf dem iPhone:</b> Tippe unten auf <b>Teilen</b> (Viereck mit Pfeil) und dann auf <b>„Zum Home-Bildschirm“</b>. ' +
-      'Öffne heylivo danach über das neue Symbol – dort kannst du die Erinnerungen einschalten.</div>';
-  }
-  if (pushState === "blocked") {
-    return '<div class="pushinfo">🔕 Benachrichtigungen sind für heylivo blockiert. Erlaube sie in den Einstellungen deines Browsers, damit Livo dich erinnern kann.</div>';
-  }
-  if (pushState === "unsupported") {
-    return '<div class="pushinfo">Dieser Browser kann keine Erinnerungen anzeigen. Am besten klappt es mit Chrome auf Android und Safari auf dem iPhone.</div>';
-  }
-  if (pushState === "on") return '<p class="quota">🔔 Erinnerungen sind an</p>';
+  if (pushState === "ios-install") return '<div class="pushinfo">' + t("push.ios") + '</div>';
+  if (pushState === "blocked") return '<div class="pushinfo">' + t("push.blocked") + '</div>';
+  if (pushState === "unsupported") return '<div class="pushinfo">' + t("push.unsupported") + '</div>';
+  if (pushState === "on") return '<p class="quota">' + t("push.on") + '</p>';
   return "";
 }

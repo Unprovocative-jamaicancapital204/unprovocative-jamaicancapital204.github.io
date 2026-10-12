@@ -35,7 +35,30 @@ const CORS_HEADERS = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS'
 };
 
-type Sub = { endpoint: string; p256dh: string; auth_key: string; user_id: string };
+type Sub = { endpoint: string; p256dh: string; auth_key: string; user_id: string; lang?: string };
+const SUB_COLUMNS = 'endpoint, p256dh, auth_key, user_id, lang';
+
+// Texte der Push-Nachrichten je App-Sprache (das Gerät merkt sich die Sprache beim Einschalten)
+const TEXT: Record<string, Record<string, string>> = {
+  de: {
+    today: 'heute fällig', tomorrow: 'morgen fällig', yesterday: 'seit gestern fällig', overdue: 'seit {n} Tagen fällig',
+    days: 'in {n} Tagen', months: 'in {n} Monaten', years: 'in {n} Jahren', dueOn: 'fällig am {date}', clock: ' Uhr',
+    many: '{n} Fristen brauchen deine Aufmerksamkeit', more: '… und {n} weitere',
+    soon: 'Beginnt in {n} Minuten · {time}', soon1: 'Beginnt in 1 Minute · {time}', now: 'Jetzt · {time}',
+    testTitle: '✓ Erinnerungen sind an', testBody: 'Livo meldet sich, sobald eine Frist näher rückt.'
+  },
+  en: {
+    today: 'due today', tomorrow: 'due tomorrow', yesterday: 'overdue since yesterday', overdue: '{n} days overdue',
+    days: 'in {n} days', months: 'in {n} months', years: 'in {n} years', dueOn: 'due {date}', clock: '',
+    many: '{n} deadlines need your attention', more: '… and {n} more',
+    soon: 'Starts in {n} minutes · {time}', soon1: 'Starts in 1 minute · {time}', now: 'Now · {time}',
+    testTitle: '✓ Reminders are on', testBody: 'Livo will get in touch when a deadline is coming up.'
+  }
+};
+function tx(lang: string | undefined, key: string, vars: Record<string, string | number> = {}): string {
+  const s = (TEXT[lang ?? ''] ?? TEXT.en)[key] ?? TEXT.en[key] ?? key;
+  return s.replace(/\{(\w+)\}/g, (m, k) => (vars[k] != null ? String(vars[k]) : m));
+}
 type Deadline = { id: string; user_id: string; title: string; due: string; due_time: string | null; lead_days: number; notified_for: string | null };
 type SoonRow = { id: string; user_id: string; title: string; due: string; due_time: string; remind_min: number; tz: string | null; time_notified_for: string | null };
 type Payload = { title: string; body: string; tag: string; url: string; urgency?: string };
@@ -56,20 +79,22 @@ function addDays(iso: string, n: number): string {
 function daysBetween(from: string, to: string): number {
   return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86400000);
 }
-function fmt(iso: string): string {
+// Deutsch "31.03.2027", sonst "31 Mar 2027" - eindeutig, egal ob das Handy Tag oder Monat zuerst schreibt
+function fmt(iso: string, lang?: string): string {
   const [y, m, d] = iso.split('-');
-  return `${d}.${m}.${y}`;
+  if (lang === 'de') return `${d}.${m}.${y}`;
+  return new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' }).format(new Date(`${iso}T00:00:00Z`));
 }
 // Gleiche Texte wie in der App (whenText in app.js)
-function whenText(days: number): string {
-  if (days === 0) return 'heute fällig';
-  if (days === 1) return 'morgen fällig';
-  if (days === -1) return 'seit gestern fällig';
-  if (days < 0) return `seit ${-days} Tagen fällig`;
-  if (days <= 60) return `in ${days} Tagen`;
+function whenText(days: number, lang?: string): string {
+  if (days === 0) return tx(lang, 'today');
+  if (days === 1) return tx(lang, 'tomorrow');
+  if (days === -1) return tx(lang, 'yesterday');
+  if (days < 0) return tx(lang, 'overdue', { n: -days });
+  if (days <= 60) return tx(lang, 'days', { n: days });
   const months = Math.round(days / 30.44);
-  if (months < 24) return `in ${months} Monaten`;
-  return `in ${Math.round(days / 365.25)} Jahren`;
+  if (months < 24) return tx(lang, 'months', { n: months });
+  return tx(lang, 'years', { n: Math.round(days / 365.25) });
 }
 
 // --- Web Push: RFC 8291 + RFC 8292, wie staff-push in Smart Menu -----------------
@@ -194,21 +219,22 @@ async function fetchAll<T>(page: (from: number, to: number) => PromiseLike<{ dat
   }
 }
 
-function messageFor(list: Deadline[], today: string): Payload {
+function messageFor(list: Deadline[], today: string, lang?: string): Payload {
   list.sort((a, b) => a.due.localeCompare(b.due));
   if (list.length === 1) {
     const d = list[0];
-    const when = whenText(daysBetween(today, d.due));
+    const when = whenText(daysBetween(today, d.due), lang);
+    const clock = d.due_time ? `, ${d.due_time.slice(0, 5)}${tx(lang, 'clock')}` : '';
     return {
       title: d.title,
-      body: `${when.charAt(0).toUpperCase()}${when.slice(1)} · fällig am ${fmt(d.due)}${d.due_time ? `, ${d.due_time.slice(0, 5)} Uhr` : ''}`,
+      body: `${when.charAt(0).toUpperCase()}${when.slice(1)} · ${tx(lang, 'dueOn', { date: fmt(d.due, lang) })}${clock}`,
       tag: `livo-${d.id}`,
       url: APP_URL
     };
   }
-  const lines = list.slice(0, 4).map((d) => `${d.title} – ${whenText(daysBetween(today, d.due))}`);
-  if (list.length > 4) lines.push(`… und ${list.length - 4} weitere`);
-  return { title: `${list.length} Fristen brauchen deine Aufmerksamkeit`, body: lines.join('\n'), tag: 'livo-daily', url: APP_URL };
+  const lines = list.slice(0, 4).map((d) => `${d.title} – ${whenText(daysBetween(today, d.due), lang)}`);
+  if (list.length > 4) lines.push(tx(lang, 'more', { n: list.length - 4 }));
+  return { title: tx(lang, 'many', { n: list.length }), body: lines.join('\n'), tag: 'livo-daily', url: APP_URL };
 }
 
 // Nur wer in der Testphase ist oder Livo Plus hat (gleiche Regel wie 0002_trial.sql)
@@ -223,7 +249,7 @@ async function eligibleUsers(today: string): Promise<Set<string>> {
 async function subscriptionsOf(userIds: string[]): Promise<Sub[]> {
   const subs: Sub[] = [];
   for (let i = 0; i < userIds.length; i += 100) {
-    const { data } = await supabase.from('push_subscriptions').select('endpoint, p256dh, auth_key, user_id').in('user_id', userIds.slice(i, i + 100));
+    const { data } = await supabase.from('push_subscriptions').select(SUB_COLUMNS).in('user_id', userIds.slice(i, i + 100));
     subs.push(...((data ?? []) as Sub[]));
   }
   return subs;
@@ -271,7 +297,9 @@ async function runSoon() {
     const at = zonedToUtc(row.due, row.due_time, row.tz || 'Europe/Berlin');
     const minutes = Math.round((at - now) / 60000);
     const time = row.due_time.slice(0, 5);
-    const body = minutes > 0 ? `Beginnt in ${minutes} ${minutes === 1 ? 'Minute' : 'Minuten'} · ${time} Uhr` : `Jetzt · ${time} Uhr`;
+    const lang = targets[0].lang;
+    const clock = time + tx(lang, 'clock');
+    const body = minutes > 1 ? tx(lang, 'soon', { n: minutes, time: clock }) : minutes === 1 ? tx(lang, 'soon1', { time: clock }) : tx(lang, 'now', { time: clock });
     const ok = await deliver(targets, { title: row.title, body, tag: `livo-soon-${row.id}`, url: APP_URL, urgency: 'high' });
     if (!ok) continue;
     sent++;
@@ -301,7 +329,7 @@ async function runReminders() {
     const targets = subs.filter((sub) => sub.user_id === userId);
     // Ohne Gerät noch nichts abhaken - die Erinnerung kommt, sobald Push an ist.
     if (!targets.length) continue;
-    const ok = await deliver(targets, messageFor(list, today));
+    const ok = await deliver(targets, messageFor(list, today, targets[0].lang));
     if (!ok) continue;
     users++;
     devices += ok;
@@ -336,10 +364,11 @@ Deno.serve(async (request) => {
     const token = (request.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '');
     const { data, error } = await supabase.auth.getUser(token);
     if (error || !data.user) return json({ error: 'Not signed in.' }, 401);
-    const { data: subs } = await supabase.from('push_subscriptions').select('endpoint, p256dh, auth_key, user_id').eq('user_id', data.user.id);
+    const { data: subs } = await supabase.from('push_subscriptions').select(SUB_COLUMNS).eq('user_id', data.user.id);
+    const lang = (subs?.[0] as Sub | undefined)?.lang;
     const sent = await deliver((subs ?? []) as Sub[], {
-      title: '✓ Erinnerungen sind an',
-      body: 'Livo meldet sich, sobald eine Frist näher rückt.',
+      title: tx(lang, 'testTitle'),
+      body: tx(lang, 'testBody'),
       tag: 'livo-on',
       url: APP_URL
     });

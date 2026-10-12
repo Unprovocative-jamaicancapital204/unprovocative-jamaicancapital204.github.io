@@ -31,7 +31,9 @@ body.lock { overflow: hidden; }
 
 /* Kopfzeile */
 .top { position: sticky; top: 0; z-index: 5; background: rgba(245,247,251,.92); backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
+.topbar { display: flex; align-items: center; justify-content: space-between; }
 .brand { display: flex; align-items: center; gap: 8px; height: 58px; }
+.langsel { padding: 6px 8px; border: 1px solid var(--line); border-radius: 10px; background: #fff; color: var(--ink); font: inherit; font-size: 14px; }
 .brand img { width: 34px; height: 34px; }
 .wm { font-size: 23px; font-weight: 800; letter-spacing: -.03em; color: var(--ink); }
 .wm span { background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; }

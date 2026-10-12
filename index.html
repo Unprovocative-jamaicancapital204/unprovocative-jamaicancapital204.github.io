@@ -6,6 +6,9 @@
 <meta name="theme-color" content="#3062f9">
 <title>heylivo – Nie wieder eine Frist verpassen</title>
 <meta name="description" content="heylivo merkt sich Ausweis, TÜV, Versicherungen, Verträge und Arzttermine – und erinnert dich rechtzeitig. Einfach sagen: „Hey Livo …“. 30 Tage kostenlos testen.">
+<link rel="alternate" hreflang="de" href="https://heylivo.github.io/">
+<link rel="alternate" hreflang="en" href="https://heylivo.github.io/en/">
+<link rel="alternate" hreflang="x-default" href="https://heylivo.github.io/en/">
 <link rel="icon" href="icon.png" type="image/png">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <script>
@@ -33,6 +36,10 @@
   .btn { display: inline-block; padding: 14px 24px; border-radius: 14px; background: var(--grad); color: #fff; font-weight: 800; text-decoration: none; box-shadow: 0 10px 24px -10px rgba(48,98,249,.7); }
   .btn.small { padding: 9px 16px; font-size: 15px; box-shadow: none; }
   .btn.ghost { background: #fff; color: var(--blue); border: 2px solid var(--blue); box-shadow: none; }
+  .right { display: flex; align-items: center; gap: 10px; }
+  .langs { display: flex; padding: 2px; border: 1px solid var(--line); border-radius: 999px; }
+  .langs a { padding: 4px 10px; border-radius: 999px; color: var(--muted); font-size: 13px; font-weight: 700; text-decoration: none; }
+  .langs a[aria-current] { background: var(--ink); color: #fff; }
 
   .hero { background: linear-gradient(180deg, var(--brand-soft), #fff); padding: 64px 0 56px; }
   .hero .wrap { display: grid; grid-template-columns: 1.1fr .9fr; gap: 48px; align-items: center; }
@@ -106,7 +113,10 @@
   }
   @media (max-width: 520px) {
     .topics { grid-template-columns: 1fr; }
-    header .btn.small { padding: 8px 12px; }
+    header .btn.small { padding: 8px 12px; font-size: 14px; }
+    .logo img { width: 30px; height: 30px; }
+    .wm { font-size: 20px; }
+    .langs a { padding: 4px 8px; }
   }
 </style>
 </head>
@@ -115,7 +125,10 @@
 <header>
   <div class="wrap">
     <a class="logo" href="./"><img src="icon.png" alt=""><span class="wm">hey<span>livo</span></span></a>
-    <a class="btn small" href="app/">App öffnen</a>
+    <div class="right">
+      <nav class="langs" aria-label="Sprache"><a href="./" lang="de" aria-current="page">DE</a><a href="en/" lang="en" hreflang="en">EN</a></nav>
+      <a class="btn small" href="app/?lang=de">App öffnen</a>
+    </div>
   </div>
 </header>
 
@@ -126,8 +139,8 @@
         <h1>Nie wieder eine <em>Frist</em> verpassen.</h1>
         <p class="lead">heylivo merkt sich Ausweis, TÜV, Versicherungen, Verträge und Arzttermine – und erinnert dich rechtzeitig. Einfach sagen: „Hey Livo …“</p>
         <div class="ctas">
-          <a class="btn" href="app/">30 Tage kostenlos testen</a>
-          <a class="btn ghost" href="app/?demo=1">Demo ansehen</a>
+          <a class="btn" href="app/?lang=de">30 Tage kostenlos testen</a>
+          <a class="btn ghost" href="app/?demo=1&amp;lang=de">Demo ansehen</a>
         </div>
         <p class="note">Ohne Anmeldung · ohne Kreditkarte · für Android und iPhone</p>
       </div>
@@ -248,7 +261,7 @@
     <div class="wrap">
       <h2>Hab dein Leben im Griff – ohne an alles denken zu müssen.</h2>
       <p>30 Tage kostenlos. Ohne Anmeldung. Ohne Kreditkarte.</p>
-      <a class="btn" href="app/">Jetzt kostenlos testen</a>
+      <a class="btn" href="app/?lang=de">Jetzt kostenlos testen</a>
     </div>
   </section>
 </main>
