@@ -6,13 +6,14 @@
 
 var SUPABASE_URL = "https://fkhngrvqxlpqxpllrnoj.supabase.co";
 var SUPABASE_KEY = "sb_publishable_Ya83flK2efxCxi1WecSCwA_wbC_njXD"; // öffentlicher Schlüssel, darf im Code stehen
-var FREE_LIMIT = 5;
+var TRIAL_DAYS = 30; // Testphase ab der ersten Frist, danach nur mit Livo Plus (prüft auch die Datenbank)
 
 var params = new URLSearchParams(location.search);
 var DEMO = params.get("demo") === "1";
 var sb = DEMO ? null : window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 var items = [];
 var plusUntil = null;
+var trialStarted = null; // "JJJJ-MM-TT" oder null = Testphase noch nicht begonnen
 
 /* ---------- Speicher ---------- */
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
@@ -41,12 +42,15 @@ async function loadAll() {
   items = r.data.map(fromRow);
   var p = await sb.from("plans").select("plus_until").maybeSingle();
   plusUntil = p.data ? p.data.plus_until : null;
+  var u = await sb.from("usage").select("trial_started").maybeSingle();
+  trialStarted = u.data ? u.data.trial_started : null;
 }
 async function addItem(it) {
   if (DEMO) { it.id = uid(); items.push(it); return; }
   var r = await sb.from("deadlines").insert(toRow(it)).select().single();
   if (r.error) throw r.error;
   items.push(fromRow(r.data));
+  if (!trialStarted) trialStarted = toISO(today()); // die erste Frist startet die Testphase
 }
 async function updateItem(it) {
   if (DEMO) return;
@@ -61,10 +65,18 @@ async function deleteItem(id) {
   items = items.filter(function (x) { return x.id !== id; });
 }
 function isPlus() { return !!plusUntil && plusUntil >= toISO(today()); }
-function limitReached() { return !DEMO && !isPlus() && items.length >= FREE_LIMIT; }
+// Tage bis zum Ende der Testphase (0 = endet heute, negativ = vorbei, null = noch nicht begonnen)
+function trialDaysLeft() {
+  return trialStarted ? diffDays(today(), addDays(fromISO(trialStarted), TRIAL_DAYS)) : null;
+}
+function canEdit() {
+  if (DEMO || isPlus()) return true;
+  var left = trialDaysLeft();
+  return left === null || left >= 0;
+}
 function errText(e) {
-  return e && e.message === "free_limit"
-    ? "Gratis sind bis zu " + FREE_LIMIT + " Fristen möglich. Mit Livo Plus für 19,99 € im Jahr unbegrenzt – kommt bald."
+  return e && e.message === "trial_over"
+    ? "Deine " + TRIAL_DAYS + " Tage Testphase sind vorbei. Mit Livo Plus für 19,99 € im Jahr geht es weiter."
     : "Das Speichern hat nicht geklappt. Bitte prüf deine Internetverbindung und versuch es nochmal.";
 }
 
@@ -135,13 +147,27 @@ function sortedItems() {
 var VOICEBAR = '<button type="button" class="voicebar" data-act="voice"><span class="mic-ico">🎤</span>' +
   '<span><b>Hey Livo …</b><small>Frist einfach sagen, z. B. „Mein Ausweis läuft im März 2027 ab“</small></span></button>';
 
+// Zeile unter "Hey Livo": Stand der Testphase oder von Livo Plus
+function statusHTML() {
+  if (DEMO) return "";
+  if (isPlus()) return '<p class="quota">Livo Plus aktiv bis ' + fmt(fromISO(plusUntil)) + '</p>';
+  var left = trialDaysLeft();
+  if (left === null) return '<p class="quota"><b>' + TRIAL_DAYS + ' Tage kostenlos testen</b> – die Testphase startet mit deiner ersten Frist.</p>';
+  if (left >= 0) {
+    return '<p class="quota">Testphase: ' + (left === 0 ? "<b>endet heute</b>" : "noch <b>" + left + (left === 1 ? " Tag" : " Tage") + "</b> kostenlos") +
+      ' · <button type="button" class="linkbtn" data-act="plus">Livo Plus</button></p>';
+  }
+  return '<button type="button" class="expired" data-act="plus"><b>Deine Testphase ist vorbei.</b> ' +
+    'Deine Fristen kannst du weiter ansehen. Zum Eintragen, Ändern und für Erinnerungen: <u>Livo Plus aktivieren</u></button>';
+}
+
 function render() {
   var list = document.getElementById("list");
   if (!items.length) { list.innerHTML = emptyHTML(); return; }
   var all = sortedItems();
   var now = all.filter(function (it) { return status(it).key !== "later"; });
   var later = all.filter(function (it) { return status(it).key === "later"; });
-  var html = VOICEBAR + (now.length
+  var html = (canEdit() ? VOICEBAR : "") + statusHTML() + (now.length
     ? '<h2 class="sec sec-now">Jetzt kümmern <span>' + now.length + '</span></h2>' + now.map(card).join("")
     : '<div class="allgood">✅ Alles im Griff – gerade ist nichts fällig.</div>');
   if (later.length) html += '<h2 class="sec">Alles im Blick</h2>' + later.map(card).join("");
@@ -158,7 +184,7 @@ function card(it) {
 function emptyHTML() {
   var quick = ["personalausweis", "tuev", "kfzversicherung", "zahnarzt", "rechnung", "versicherung"];
   return '<div class="empty"><h1>Nie wieder eine Frist verpassen.</h1>' +
-    '<p>Sag Livo einfach, woran du denken musst – oder wähle eine Vorlage.</p>' + VOICEBAR +
+    '<p>Sag Livo einfach, woran du denken musst – oder wähle eine Vorlage.</p>' + VOICEBAR + statusHTML() +
     '<div class="chips">' +
     quick.map(function (id) { return '<button type="button" class="chip" data-tpl="' + id + '">' + esc(find(TEMPLATES, id).title) + '</button>'; }).join("") +
     '</div><button type="button" class="btn light" data-act="add">Alle Vorlagen ansehen</button></div>';
@@ -394,8 +420,10 @@ function showItem(id) {
     '<dt>Erinnerung</dt><dd>' + it.lead + ' Tage vorher (' + remindText(it) + ')</dd>' +
     '<dt>Wiederholung</dt><dd>' + everyText(it.every) + '</dd></dl>' +
     (t && t.hint ? '<p class="hint">' + esc(t.hint) + '</p>' : "") +
-    '<button type="button" class="btn" data-act="done" data-id="' + it.id + '">' + main + '</button>' +
-    '<button type="button" class="btn light" data-act="edit" data-id="' + it.id + '">Bearbeiten</button>' +
+    (canEdit()
+      ? '<button type="button" class="btn" data-act="done" data-id="' + it.id + '">' + main + '</button>' +
+        '<button type="button" class="btn light" data-act="edit" data-id="' + it.id + '">Bearbeiten</button>'
+      : '<button type="button" class="btn" data-act="plus">Livo Plus aktivieren, um zu ändern</button>') +
     '<button type="button" class="btn danger" data-act="del" data-id="' + it.id + '">Löschen</button></div>');
 }
 
@@ -444,7 +472,8 @@ function showEdit(id, renewing) {
 
 async function removeItem(id) {
   var it = find(items, id);
-  if (!it || !confirm("„" + it.title + "“ wirklich löschen?")) return;
+  if (!it) return;
+  if (!confirm("„" + it.title + "“ wirklich löschen?")) return;
   try {
     await deleteItem(id);
     closeSheet(); render();
@@ -453,11 +482,14 @@ async function removeItem(id) {
   }
 }
 
-// Gratis-Grenze erreicht: freundlicher Hinweis statt Formular
-function showLimit() {
-  openSheet('<h3>Du hast schon ' + FREE_LIMIT + ' Fristen im Blick 🎉</h3>' +
-    '<p class="hint">Gratis sind bis zu ' + FREE_LIMIT + ' Fristen möglich. Mit <b>Livo Plus</b> für 19,99 € im Jahr behältst du unbegrenzt viele im Blick – mit mehreren Erinnerungen pro Frist und für die ganze Familie. Livo Plus kommt bald.</p>' +
-    '<p class="muted">Bis dahin kannst du erledigte Fristen löschen, um Platz zu machen.</p>' +
+// Livo Plus: Angebot, und nach der Testphase der Hinweis statt Formular
+function showPlus() {
+  var over = !canEdit();
+  openSheet('<h3>' + (over ? "Deine " + TRIAL_DAYS + " Tage Testphase sind vorbei" : "Livo Plus") + '</h3>' +
+    '<p class="hint"><b>Livo Plus – 19,99 € im Jahr</b> (etwa 1,67 € im Monat)<br>' +
+    '✓ Unbegrenzt viele Fristen<br>✓ Erinnerungen aufs Handy<br>✓ Eintragen per Sprache: „Hey Livo …“<br>✓ Erledigen, ändern, erneuern</p>' +
+    (over ? '<p class="muted">Deine bisherigen Fristen bleiben erhalten und du kannst sie weiter ansehen.</p>' : "") +
+    '<button type="button" class="btn" disabled>Livo Plus kommt bald</button>' +
     '<button type="button" class="btn light" data-act="close">OK</button>');
 }
 
@@ -477,8 +509,9 @@ document.addEventListener("click", function (e) {
   if (!el) return;
   if (el.hasAttribute("data-open")) return showItem(el.getAttribute("data-open"));
   var act = el.getAttribute("data-act"), id = el.getAttribute("data-id");
-  // Neue Frist anlegen geht nur unter der Gratis-Grenze
-  if ((el.hasAttribute("data-tpl") || act === "add" || act === "voice") && limitReached()) return showLimit();
+  // Anlegen und Ändern nur in der Testphase oder mit Livo Plus (Löschen und Ansehen immer)
+  var changes = el.hasAttribute("data-tpl") || act === "add" || act === "voice" || act === "done" || act === "edit";
+  if (act === "plus" || (changes && !canEdit())) return showPlus();
   if (el.hasAttribute("data-tpl")) return showNew(el.getAttribute("data-tpl"));
   if (act === "add") showPicker();
   else if (act === "voice") showVoice();

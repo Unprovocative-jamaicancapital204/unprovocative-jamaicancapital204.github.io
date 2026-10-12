@@ -53,19 +53,7 @@ grant select, insert, update, delete on public.deadlines to authenticated;
 grant select, insert, update, delete on public.push_subscriptions to authenticated;
 grant select on public.plans to authenticated;
 
--- Gratis: höchstens 5 Fristen, mit Livo Plus unbegrenzt
-create or replace function public.enforce_free_limit() returns trigger
-language plpgsql set search_path = public as $$
-begin
-  if (select count(*) from public.deadlines where user_id = new.user_id) >= 5
-     and not exists (select 1 from public.plans where user_id = new.user_id and plus_until >= current_date) then
-    raise exception 'free_limit' using hint = 'Gratis sind bis zu 5 Fristen möglich.';
-  end if;
-  return new;
-end $$;
-drop trigger if exists deadlines_free_limit on public.deadlines;
-create trigger deadlines_free_limit before insert on public.deadlines
-  for each row execute function public.enforce_free_limit();
+-- Testphase und Livo Plus: siehe 0002_trial.sql
 
 -- Kontrolle: drei Zeilen mit je 0 = alles angelegt
 select 'deadlines' as tabelle, count(*) as anzahl from public.deadlines

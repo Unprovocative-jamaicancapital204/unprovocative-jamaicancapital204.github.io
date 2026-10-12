@@ -56,6 +56,12 @@ main { padding-bottom: 110px; }
 .pill { flex: none; padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 700; white-space: nowrap; background: var(--later-bg); color: var(--later); }
 .st-late .pill { background: var(--late-bg); color: var(--late); }
 .st-now .pill { background: var(--now-bg); color: var(--now); }
+.quota { margin: 10px 4px 0; font-size: 13px; color: var(--muted); }
+.quota b { color: var(--brand); }
+.empty .quota { margin: -8px 0 18px; }
+.linkbtn { padding: 0; border: 0; background: none; color: var(--brand); font: inherit; font-weight: 700; text-decoration: underline; cursor: pointer; }
+.expired { display: block; width: 100%; margin: 14px 0 0; padding: 14px 16px; border: 1px solid #fcd34d; border-radius: 16px; background: #fffbeb; color: #78350f; text-align: left; font: inherit; font-size: 15px; cursor: pointer; }
+.expired u { color: var(--brand); font-weight: 700; }
 .loading { margin: 40px 0; text-align: center; color: var(--muted); }
 .offline { margin: 18px 0 0; padding: 14px; border-radius: 14px; background: var(--late-bg); color: var(--late); font-weight: 600; }
 .btn:disabled { opacity: .6; cursor: default; }
