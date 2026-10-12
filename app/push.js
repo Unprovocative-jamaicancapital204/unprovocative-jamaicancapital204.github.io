@@ -16,13 +16,19 @@ function base64UrlToBytes(s) {
   return Uint8Array.from(bin, function (c) { return c.charCodeAt(0); });
 }
 
+// Manche Browser antworten hier nie - dann lieber ohne Push weiter als hängen
+function withTimeout(promise, ms) {
+  return Promise.race([promise, new Promise(function (resolve) { setTimeout(function () { resolve(null); }, ms); })]);
+}
+
 async function initPush() {
   if (DEMO) return;
   if (!pushSupported) { pushState = isIOS && !isStandalone ? "ios-install" : "unsupported"; return; }
   try {
-    swReg = await navigator.serviceWorker.register("sw.js");
+    swReg = await withTimeout(navigator.serviceWorker.register("sw.js"), 8000);
+    if (!swReg) { pushState = "off"; return; }
     if (Notification.permission === "denied") { pushState = "blocked"; return; }
-    var sub = await swReg.pushManager.getSubscription();
+    var sub = await withTimeout(swReg.pushManager.getSubscription(), 8000);
     pushState = sub && Notification.permission === "granted" ? "on" : "off";
     // Das Gerät beim Konto halten (z. B. wenn der Browser das Abo erneuert hat)
     if (pushState === "on") saveSubscription(sub).catch(function () {});
@@ -42,7 +48,12 @@ async function saveSubscription(sub) {
 
 // Muss direkt aus dem Tippen kommen, sonst fragt Safari nicht nach der Erlaubnis
 async function enablePush() {
-  var reg = swReg || await navigator.serviceWorker.register("sw.js");
+  var reg = swReg;
+  if (!reg || !reg.active) {
+    await navigator.serviceWorker.register("sw.js");
+    reg = await withTimeout(navigator.serviceWorker.ready, 8000);
+    if (!reg) return false;
+  }
   var sub;
   try {
     sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: base64UrlToBytes(VAPID_PUBLIC_KEY) });

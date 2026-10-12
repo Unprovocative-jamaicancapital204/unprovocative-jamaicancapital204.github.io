@@ -575,7 +575,6 @@ async function start() {
     try {
       await signIn();
       await loadAll();
-      await initPush();
     } catch (e) {
       list.innerHTML = '<p class="offline">Keine Verbindung. Bitte prüf dein Internet und lade die Seite neu.</p>';
       return;
@@ -583,6 +582,8 @@ async function start() {
     try { localStorage.removeItem("livo.items.v1"); } catch (e) {} // Fristen aus dem ersten Prototyp
   }
   render();
+  // Erinnerungen im Hintergrund vorbereiten - die Liste wartet nie darauf
+  if (!DEMO) initPush().then(render, render);
   var show = params.get("show") || "";
   if (params.get("say")) understand(params.get("say"));
   else if (show === "add") showPicker();
