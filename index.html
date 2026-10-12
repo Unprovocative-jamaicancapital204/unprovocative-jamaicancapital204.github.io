@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#3062f9">
+<title>heylivo – Nie wieder eine Frist verpassen</title>
+<meta name="description" content="Ausweis, TÜV, Versicherungen, Verträge, Arzttermine: Livo merkt sich deine Fristen und erinnert dich rechtzeitig. Einfach eintippen oder sagen: „Hey Livo …“">
+<link rel="icon" href="icon.png" type="image/png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap brand"><img src="icon.png" alt=""><span class="wm">hey<span>livo</span></span></div>
+</header>
+
+<div class="wrap">
+  <p class="proto">Prototyp: Deine Fristen bleiben nur in diesem Browser. Anmeldung und Push-Erinnerungen kommen mit Version 1.</p>
+  <main id="list"></main>
+</div>
+
+<button class="fab" type="button" data-act="add" aria-label="Frist hinzufügen">+</button>
+<div class="sheet-bg" id="sheetBg" hidden></div>
+<section class="sheet" id="sheet" hidden></section>
+<div class="toast" id="toast" hidden></div>
+
+<script src="templates.js"></script>
+<script src="voice.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
