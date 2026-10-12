@@ -64,22 +64,19 @@ function validDay(y, m, d) {
   var dt = new Date(y, m - 1, d);
   return dt.getMonth() === m - 1 ? dt : null;
 }
-// Tag + Monat; ohne Jahr das nächste kommende Datum
+// Ohne Jahreszahl gilt immer das laufende Jahr ("03.10" = 03.10. dieses Jahres,
+// auch wenn der Tag vorbei ist); nur mit Jahr ("03.10.2027") ein anderes.
+function yearOf(y) { return y ? (+y < 100 ? 2000 + +y : +y) : today().getFullYear(); }
+// Tag + Monat
 function dayMonth(d, m, y) {
   if (!d || !m || m > 12) return null;
-  if (y) return validDay(+y < 100 ? 2000 + +y : +y, m, d);
-  var t = today(), dt = validDay(t.getFullYear(), m, d);
-  return dt && dt < t ? validDay(t.getFullYear() + 1, m, d) : dt;
+  return validDay(yearOf(y), m, d);
 }
-// "Ende März" = letzter Tag, "Anfang" = 1., "Mitte" = 15.; ohne Jahr der nächste kommende
+// "Ende März" = letzter Tag, "Anfang" = 1., "Mitte" = 15.
 function monthPart(m, y, part) {
   if (!m || m > 12) return null;
-  function at(year) {
-    return part === "anfang" ? new Date(year, m - 1, 1) : part === "mitte" ? new Date(year, m - 1, 15) : new Date(year, m, 0);
-  }
-  if (y) return at(+y);
-  var t = today(), dt = at(t.getFullYear());
-  return dt < t ? at(t.getFullYear() + 1) : dt;
+  var year = yearOf(y);
+  return part === "anfang" ? new Date(year, m - 1, 1) : part === "mitte" ? new Date(year, m - 1, 15) : new Date(year, m, 0);
 }
 
 function extract(text) {
@@ -188,7 +185,8 @@ function draftFrom(text) {
   var needsDate = t.fields.some(function (f) { return f.type === "date" || f.type === "month"; });
   if (!needsDate) d.due = toISO(x.date || r.due);              // Kfz, Reifen, Steuer: Datum optional
   else if (!x.date) d.due = "";                                  // Datum fehlt → Nutzer trägt es ein
-  else if (t.dateMeans && x.date >= today()) d.due = toISO(x.date); // Zukunft = der Termin selbst
+  // Zukunft oder "auffrischen / fällig / nächste" = der Termin selbst, sonst "letztes Mal" bzw. Vertragsbeginn
+  else if (t.dateMeans && (x.date >= today() || /auffrisch|fällig|nächste/i.test(text))) d.due = toISO(x.date);
   else d.due = toISO(r.due);
   return d;
 }
