@@ -47,7 +47,7 @@ var KEYWORDS = [
   ["zahnarzt", ["zahnarzt", "zahnärzt", "zahnreinigung", "prophylaxe"]],
   ["checkup", ["check-up", "checkup", "check up", "vorsorge"]],
   ["tetanus", ["tetanus", "impfung", "auffrisch"]],
-  ["arzttermin", ["arzt", "ärztin", "doktor", " dr ", "praxis", "physio", "termin bei"]],
+  ["arzttermin", ["arzt", "ärztin", "doktor", " dr ", "praxis", "physio"]],
   ["rechnung", ["bezahlen", "überweisen", "überweisung", " zahlen "]]
 ];
 // Füllwörter, die nicht in den Titel gehören (mehrteilige zuerst)
@@ -106,8 +106,8 @@ function extract(text) {
     var d = fn(mm);
     if (d && isDate(d)) { date = d; cut(mm[0]); }
   }
-  // 15.03.2027 · 15.3.27 · 15.3.
-  first(new RegExp(" " + PRE + "(\\d{1,2})\\.(\\d{1,2})\\.(\\d{2,4})?(?= )"), function (x) { return dayMonth(+x[1], +x[2], x[3]); });
+  // 15.03.2027 · 15.3.27 · 15.3. · 15.3 · 15. 3. (Chrome schreibt gesprochene Daten unterschiedlich)
+  first(new RegExp(" " + PRE + "(\\d{1,2})\\. ?(\\d{1,2})(?:\\.(\\d{2,4})?)?(?= )"), function (x) { return dayMonth(+x[1], +x[2], x[3]); });
   // 15. März 2027 · 15 März
   first(new RegExp(" " + PRE + "(\\d{1,2})\\.? (" + MONTH_RE + ")\\.?(?: (\\d{4}))?(?= )"), function (x) { return dayMonth(+x[1], MONTHS[x[2]], x[3]); });
   // ersten April

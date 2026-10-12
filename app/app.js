@@ -223,14 +223,19 @@ function showPicker() {
 /* ---------- Spracheingabe: "Hey Livo" ---------- */
 var Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 var rec = null;
+var listening = null;       // laufende Aufnahme: { finish }
+var SILENCE_MS = 2500;      // so lange still = der Satz ist fertig
+var FIRST_WORD_MS = 8000;   // so lange warten wir, bis jemand anfängt zu sprechen
 
 function stopListening() {
+  listening = null;
   if (rec) { var r = rec; rec = null; try { r.abort(); } catch (e) {} }
 }
 
 function showVoice() {
   openSheet('<h3>🎤 Hey Livo</h3>' +
-    '<p class="muted">Sag einfach, worum es geht und wann – z. B. „Mein Ausweis läuft im März 2027 ab“ oder „Zahnarzt am 3. November um 10 Uhr“.</p>' +
+    '<p class="muted">Sag einfach, worum es geht und wann – z. B. „Mein Ausweis läuft im März 2027 ab“ oder „Zahnarzt am 3. November um 10 Uhr“. ' +
+    'Livo hört zu, bis du kurz still bist – oder tipp aufs Mikrofon, wenn du fertig bist.</p>' +
     (Recognition
       ? '<button type="button" class="mic" id="micBtn" aria-label="Sprechen">🎤</button>'
       : '<p class="hint">Spracheingabe geht in diesem Browser nicht – in Chrome auf Android und in Safari auf dem iPhone schon. Du kannst den Satz aber hier eintippen.</p>') +
@@ -239,47 +244,105 @@ function showVoice() {
     '<button class="btn" type="submit">OK</button></form>' +
     '<button type="button" class="btn light" data-act="close">Abbrechen</button>');
 
+  pendingSaid = "";
   document.getElementById("sayForm").addEventListener("submit", function (e) {
     e.preventDefault();
     var txt = e.target.elements.say.value.trim();
-    if (txt) understand(txt);
+    if (txt) understand(txt, false);
   });
   var mic = document.getElementById("micBtn");
   if (mic) {
-    mic.addEventListener("click", function () { if (rec) stopListening(); else listen(); });
+    // Tippen während der Aufnahme = "ich bin fertig", sonst neu zuhören
+    mic.addEventListener("click", function () { if (listening) listening.finish(); else listen(); });
     listen();
   }
 }
 
-function listen() {
-  var mic = document.getElementById("micBtn"), heard = document.getElementById("heard");
-  var said = "";
-  var r = new Recognition();
-  r.lang = "de-DE";
-  r.interimResults = true;
-  r.onresult = function (e) {
-    said = Array.prototype.map.call(e.results, function (x) { return x[0].transcript; }).join(" ");
-    heard.textContent = "„" + said + "“";
-  };
-  r.onerror = function (e) {
-    heard.textContent = e.error === "not-allowed" || e.error === "service-not-allowed"
-      ? "Das Mikrofon ist nicht erlaubt. Bitte im Browser erlauben – oder den Satz eintippen."
-      : e.error === "no-speech" ? "Ich habe nichts gehört. Tipp nochmal aufs Mikrofon." : "Das hat nicht geklappt. Bitte nochmal versuchen oder eintippen.";
-  };
-  r.onend = function () {
-    if (rec !== r) return;          // abgebrochen (Blatt geschlossen)
-    rec = null;
-    mic.classList.remove("on");
-    if (said) understand(said);
-  };
-  rec = r;
-  mic.classList.add("on");
-  heard.textContent = "Ich höre zu …";
-  try { r.start(); } catch (e) { rec = null; mic.classList.remove("on"); }
+// Ein gesprochener Satz ohne Datum wartet hier auf die Ergänzung ("… am 3. November")
+var pendingSaid = "";
+
+function joinText(a, b) { return a && b ? a + " " + b : a || b; }
+
+// Ergebnisse einer Runde zu einem Text. Chrome auf Android wiederholt in jedem
+// Ergebnis den bisherigen Text, Chrome am PC nicht - beides ergibt denselben Satz.
+function collect(results) {
+  var text = "";
+  for (var i = 0; i < results.length; i++) {
+    var t = results[i][0].transcript.trim();
+    if (!t) continue;
+    var lt = t.toLowerCase(), lx = text.toLowerCase();
+    if (lx && lt.indexOf(lx) === 0) text = t;
+    else if (lx.indexOf(lt) === -1) text = joinText(text, t);
+  }
+  return text;
 }
 
-function understand(text) {
-  showDraft(draftFrom(text), text);
+function listen(prompt) {
+  var mic = document.getElementById("micBtn"), heard = document.getElementById("heard");
+  var session = {}, base = "", current = "", lastHeard = 0, started = Date.now(), finishing = false, timer = null;
+  listening = session;
+  function arm(ms) {
+    clearTimeout(timer);
+    timer = setTimeout(function () { if (listening === session) session.finish(); }, ms);
+  }
+  session.finish = function () {
+    finishing = true;
+    clearTimeout(timer);
+    if (rec) { try { rec.stop(); } catch (e) {} }
+  };
+  function round() {
+    var r = new Recognition();
+    r.lang = "de-DE";
+    r.interimResults = true;
+    r.continuous = true;
+    r.onresult = function (e) {
+      current = collect(e.results);
+      lastHeard = Date.now();
+      heard.textContent = "„" + joinText(pendingSaid, joinText(base, current)) + "“";
+      arm(SILENCE_MS);
+    };
+    r.onerror = function (e) {
+      if (e.error === "not-allowed" || e.error === "service-not-allowed") {
+        finishing = true;
+        heard.textContent = "Das Mikrofon ist nicht erlaubt. Bitte im Browser erlauben – oder den Satz eintippen.";
+      }
+    };
+    r.onend = function () {
+      if (rec !== r || listening !== session) return;   // abgebrochen (Blatt geschlossen)
+      base = joinText(base, current);
+      current = "";
+      // Der Browser hört bei jeder kleinen Pause von selbst auf. Wer gerade noch
+      // gesprochen hat (oder noch gar nicht angefangen hat), ist nicht fertig: weiter zuhören.
+      if (!finishing && Date.now() - started < 60000 && (!base || Date.now() - lastHeard < SILENCE_MS)) {
+        try { round(); return; } catch (err) { /* dann eben hier beenden */ }
+      }
+      rec = null;
+      listening = null;
+      clearTimeout(timer);
+      mic.classList.remove("on");
+      if (base) understand(base, true);
+      else if (heard.textContent.indexOf("Mikrofon ist nicht erlaubt") < 0) heard.textContent = "Ich habe nichts gehört. Tipp nochmal aufs Mikrofon.";
+    };
+    rec = r;
+    r.start();
+  }
+  mic.classList.add("on");
+  heard.textContent = prompt || "Ich höre zu …";
+  arm(FIRST_WORD_MS);
+  try { round(); } catch (e) { rec = null; listening = null; mic.classList.remove("on"); }
+}
+
+function understand(text, spoken) {
+  var full = pendingSaid ? pendingSaid + " " + text : text;
+  var d = draftFrom(full);
+  // Gesprochen, aber noch ohne Datum (oft eine Pause vor dem Datum): nachfragen und weiter zuhören
+  if (!d.due && spoken && !pendingSaid && document.getElementById("micBtn")) {
+    pendingSaid = full;
+    listen("„" + full + "“ – Wann? Sag zum Beispiel „am 3. November“.");
+    return;
+  }
+  pendingSaid = "";
+  showDraft(d, full);
 }
 
 /* ---------- Formular für eine Frist (Bestätigen, Bearbeiten, Erneuern) ---------- */
