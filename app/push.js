@@ -31,9 +31,31 @@ async function initPush() {
     var sub = await withTimeout(swReg.pushManager.getSubscription(), 8000);
     pushState = sub && Notification.permission === "granted" ? "on" : "off";
     // Das Gerät beim Konto halten (z. B. wenn der Browser das Abo erneuert hat)
-    if (pushState === "on") saveSubscription(sub).catch(function () {});
+    if (pushState === "on" && !(await keepSubscription(swReg, sub))) pushState = "off";
   } catch (e) {
     pushState = "off";
+  }
+}
+
+function subscribe(reg) {
+  return reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: base64UrlToBytes(VAPID_PUBLIC_KEY) });
+}
+
+// Speichert das Abo beim aktuellen Konto. Gehört es noch einem früheren anonymen Konto
+// dieses Browsers (z. B. nach gelöschten Website-Daten), darf das neue Konto die Zeile
+// nicht übernehmen (RLS) - dann ein frisches Abo holen. Sonst sagt die App "an",
+// aber die Erinnerungen gehen an das alte Konto.
+async function keepSubscription(reg, sub) {
+  try {
+    await saveSubscription(sub);
+    return true;
+  } catch (e) { /* weiter unten neu abonnieren */ }
+  try {
+    await sub.unsubscribe();
+    await saveSubscription(await subscribe(reg));
+    return true;
+  } catch (e) {
+    return false;
   }
 }
 
@@ -56,12 +78,15 @@ async function enablePush() {
   }
   var sub;
   try {
-    sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: base64UrlToBytes(VAPID_PUBLIC_KEY) });
+    sub = await subscribe(reg);
   } catch (e) {
     pushState = Notification.permission === "denied" ? "blocked" : "off";
     return false;
   }
-  await saveSubscription(sub);
+  if (!(await keepSubscription(reg, sub))) {
+    pushState = "off";
+    return false;
+  }
   pushState = "on";
   sendTestPush();
   return true;
