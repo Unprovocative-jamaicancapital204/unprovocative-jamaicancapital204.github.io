@@ -1,0 +1,16 @@
+{
+  "name": "heylivo – Nie wieder eine Frist verpassen",
+  "short_name": "heylivo",
+  "description": "Livo merkt sich deine Fristen und erinnert dich rechtzeitig.",
+  "lang": "de",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f5f7fb",
+  "theme_color": "#3062f9",
+  "icons": [
+    { "src": "../app-icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "../app-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "../app-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

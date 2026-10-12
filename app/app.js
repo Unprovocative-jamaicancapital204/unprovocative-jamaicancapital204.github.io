@@ -167,7 +167,7 @@ function render() {
   var all = sortedItems();
   var now = all.filter(function (it) { return status(it).key !== "later"; });
   var later = all.filter(function (it) { return status(it).key === "later"; });
-  var html = (canEdit() ? VOICEBAR : "") + statusHTML() + (now.length
+  var html = (canEdit() ? VOICEBAR : "") + statusHTML() + pushHTML() + (now.length
     ? '<h2 class="sec sec-now">Jetzt kümmern <span>' + now.length + '</span></h2>' + now.map(card).join("")
     : '<div class="allgood">✅ Alles im Griff – gerade ist nichts fällig.</div>');
   if (later.length) html += '<h2 class="sec">Alles im Blick</h2>' + later.map(card).join("");
@@ -386,22 +386,30 @@ function showNew(tid) {
   if (!t) return;
   openSheet('<h3>' + find(CATEGORIES, t.cat).icon + " " + esc(t.title) + '</h3><form id="frm" novalidate>' +
     (t.hint ? '<p class="hint">' + esc(t.hint) + '</p>' : "") +
-    t.fields.map(fieldHTML).join("") + leadHTML(t.lead) +
+    t.fields.map(fieldHTML).join("") +
+    '<label class="field"><span>Uhrzeit <i>(optional)</i></span><input name="time" type="time"></label>' +
+    leadHTML(t.lead) +
     '<div class="preview" id="pv"></div><p class="err" id="err"></p>' +
     '<button class="btn" type="submit">Speichern</button>' +
     '<button class="btn light" type="button" data-act="add">Zurück</button></form>');
 
   var form = document.getElementById("frm");
-  function update() {
+  // Frist aus den Feldern der Vorlage plus der (freiwilligen) Uhrzeit
+  function current() {
     var it = build(t, readValues(form, t), readLead(form, t.lead));
+    if (it) it.time = form.elements.time.value || "";
+    return it;
+  }
+  function update() {
+    var it = current();
     document.getElementById("pv").innerHTML = it
-      ? 'Fällig am <b>' + fmt(fromISO(it.due)) + '</b> · Erinnerung <b>' + remindText(it) + '</b> · ' + everyText(it.every)
+      ? 'Fällig am <b>' + dueText(it) + '</b> · Erinnerung <b>' + remindText(it) + '</b> · ' + everyText(it.every)
       : "Fällig am … – bitte die Felder ausfüllen.";
   }
   form.addEventListener("input", update);
   form.addEventListener("submit", function (e) {
     e.preventDefault();
-    var it = build(t, readValues(form, t), readLead(form, t.lead));
+    var it = current();
     if (!it) { document.getElementById("err").textContent = "Bitte fülle die Pflichtfelder mit einem gültigen Datum aus."; return; }
     saving(form, addItem(it), "Gespeichert ✓ Erinnerung " + remindText(it));
   });
@@ -513,6 +521,17 @@ document.addEventListener("click", function (e) {
   var changes = el.hasAttribute("data-tpl") || act === "add" || act === "voice" || act === "done" || act === "edit";
   if (act === "plus" || (changes && !canEdit())) return showPlus();
   if (el.hasAttribute("data-tpl")) return showNew(el.getAttribute("data-tpl"));
+  if (act === "push") {
+    el.disabled = true;
+    enablePush().then(function (ok) {
+      render();
+      toast(ok ? "Erinnerungen sind an ✓" : pushState === "blocked" ? "Benachrichtigungen sind blockiert." : "Erinnerungen wurden nicht eingeschaltet.");
+    }, function () {
+      render();
+      toast("Das hat nicht geklappt. Bitte nochmal versuchen.");
+    });
+    return;
+  }
   if (act === "add") showPicker();
   else if (act === "voice") showVoice();
   else if (act === "close") closeSheet();
@@ -548,7 +567,7 @@ async function start() {
   var list = document.getElementById("list");
   document.getElementById("note").textContent = DEMO
     ? "Demo mit Beispiel-Fristen – hier wird nichts gespeichert."
-    : "Beta: Deine Fristen werden sicher gespeichert – ohne Anmeldung, in diesem Browser. Push-Erinnerungen kommen als Nächstes.";
+    : "Beta: Deine Fristen werden sicher gespeichert – ohne Anmeldung, in diesem Browser.";
   if (DEMO) {
     seedDemo();
   } else {
@@ -556,6 +575,7 @@ async function start() {
     try {
       await signIn();
       await loadAll();
+      await initPush();
     } catch (e) {
       list.innerHTML = '<p class="offline">Keine Verbindung. Bitte prüf dein Internet und lade die Seite neu.</p>';
       return;

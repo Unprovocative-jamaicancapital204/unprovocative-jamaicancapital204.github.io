@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#3062f9">
+<title>heylivo – Nie wieder eine Frist verpassen</title>
+<meta name="description" content="Ausweis, TÜV, Versicherungen, Verträge, Arzttermine: Livo merkt sich deine Fristen und erinnert dich rechtzeitig. Einfach eintippen oder sagen: „Hey Livo …“">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="../icon.png" type="image/png">
+<link rel="apple-touch-icon" href="../apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="heylivo">
+<link rel="stylesheet" href="style.css?v=4">
+</head>
+<body>
+
+<header class="top">
+  <a class="wrap brand" href="../"><img src="../icon.png" alt=""><span class="wm">hey<span>livo</span></span></a>
+</header>
+
+<div class="wrap">
+  <p class="proto" id="note"></p>
+  <main id="list"></main>
+</div>
+
+<button class="fab" type="button" data-act="add" aria-label="Frist hinzufügen">+</button>
+<div class="sheet-bg" id="sheetBg" hidden></div>
+<section class="sheet" id="sheet" hidden></section>
+<div class="toast" id="toast" hidden></div>
+
+<script src="vendor/supabase.js?v=4"></script>
+<script src="templates.js?v=4"></script>
+<script src="voice.js?v=4"></script>
+<script src="push.js?v=4"></script>
+<script src="app.js?v=4"></script>
+</body>
+</html>
