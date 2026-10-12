@@ -375,21 +375,47 @@ function soonText(min) {
   if (min === 60) return t("soon.hour");
   return min > 60 ? t("soon.hours", { n: min / 60 }) : t("soon.min", { n: min });
 }
+// Eigenes Textfeld statt type="time": Die Android-Uhrzeitauswahl versteckt bei Samsung im
+// Tastatur-Modus den Knopf "Set". Man tippt "2030" auf der Zahlentastatur, daraus wird 20:30.
 function timeHTML(time, remindMin) {
   var selected = remindMin == null ? SOON_DEFAULT : remindMin;
-  return '<label class="field"><span>' + t("form.time") + opt() + '</span><input name="time" type="time" value="' + esc(time || "") + '"></label>' +
+  return '<label class="field"><span>' + t("form.time") + opt() + '</span><input name="time" type="text" inputmode="numeric" autocomplete="off" maxlength="5" placeholder="' + esc(t("form.timePh")) + '" value="' + esc(time || "") + '"></label>' +
     '<label class="field" id="soonField"' + (time ? "" : " hidden") + '><span>' + t("form.soon") + '</span><select name="soon">' +
     SOON_VALUES.map(function (v) {
       return '<option value="' + v + '"' + (v === selected ? " selected" : "") + '>' + esc(soonText(v)) + '</option>';
     }).join("") + '</select></label>';
 }
+// "2030", "20:30", "20.30", "20 30" -> "20:30"; "930" -> "09:30"; "9" -> "09:00".
+// Leer -> "", ungültig -> null.
+function parseTime(value) {
+  var v = value.trim();
+  if (!v) return "";
+  var m = v.match(/^(\d{1,2})[:.,\s]?(\d{2})?$/);
+  if (!m) return null;
+  var h = parseInt(m[1], 10), mi = parseInt(m[2] || "0", 10);
+  if (h > 23 || mi > 59) return null;
+  return (h < 10 ? "0" : "") + h + ":" + (mi < 10 ? "0" : "") + mi;
+}
 function wireTime(form) {
-  form.elements.time.addEventListener("input", function () {
-    document.getElementById("soonField").hidden = !form.elements.time.value;
+  var input = form.elements.time;
+  input.addEventListener("input", function () {
+    // Nach vier Ziffern gleich den Doppelpunkt setzen
+    if (/^\d{4}$/.test(input.value) && parseTime(input.value)) input.value = parseTime(input.value);
+    document.getElementById("soonField").hidden = !input.value.trim();
+  });
+  input.addEventListener("blur", function () {
+    var v = parseTime(input.value);
+    if (v) input.value = v;
   });
 }
+// Uhrzeit aus dem Formular; null (mit Fehlermeldung), wenn sie nicht stimmt
+function readTime(form) {
+  var v = parseTime(form.elements.time.value);
+  if (v === null) document.getElementById("err").textContent = t("form.errTime");
+  return v;
+}
 function readSoon(form) {
-  return form.elements.time.value ? (parseInt(form.elements.soon.value, 10) || 0) : 0;
+  return parseTime(form.elements.time.value) ? (parseInt(form.elements.soon.value, 10) || 0) : 0;
 }
 
 function itemFormHTML(it, opts) {
@@ -412,9 +438,11 @@ function readItemForm(form, it) {
     document.getElementById("err").textContent = t("form.err");
     return false;
   }
+  var time = readTime(form);
+  if (time === null) return false;
   it.title = title;
   it.due = due;
-  it.time = form.elements.time.value || "";
+  it.time = time;
   it.remindMin = readSoon(form);
   it.every = parseInt(form.elements.every.value, 10) || 0;
   it.lead = readLead(form, it.lead);
@@ -501,7 +529,7 @@ function showNew(tid) {
   function current() {
     var it = build(tp, readValues(form, tp), readLead(form, tp.lead));
     if (it) {
-      it.time = form.elements.time.value || "";
+      it.time = parseTime(form.elements.time.value) || "";
       it.remindMin = readSoon(form);
     }
     return it;
@@ -517,6 +545,7 @@ function showNew(tid) {
     e.preventDefault();
     var it = current();
     if (!it) { document.getElementById("err").textContent = t("form.errFields"); return; }
+    if (readTime(form) === null) return;
     saving(form, addItem(it), t("saved", { x: remindText(it) }));
   });
   update();
