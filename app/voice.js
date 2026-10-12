@@ -11,6 +11,51 @@ function alt(words) { return words.slice().sort(function (a, b) { return b.lengt
 function altKeys(obj) { return alt(Object.keys(obj)); }
 function capitalize(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
 
+// Ohne Akzente und klein suchen ("Νοεμβρίου" = "νοεμβριου", "Kasım" = "kasim", "środę" = "srode"),
+// damit auch Getipptes ohne Sonderzeichen passt. Zeichen für Zeichen, damit Original und
+// Suchfassung gleich lang bleiben (cut() schneidet in beiden an derselben Stelle).
+var FOLD_EXTRA = { "ı": "i", "ł": "l", "ς": "σ" };
+function foldChar(c) {
+  var f = c.normalize ? c.normalize("NFD").replace(/[̀-ͯ]/g, "") : c;
+  if (f.length !== 1) f = c;
+  var l = f.toLowerCase();
+  if (l.length !== 1) l = f;
+  return FOLD_EXTRA[l] || l;
+}
+function foldText(s) { var out = ""; for (var i = 0; i < s.length; i++) out += foldChar(s.charAt(i)); return out; }
+// In Suchmustern nur Nicht-ASCII-Zeichen falten ("\\S", "\\d" usw. bleiben, wie sie sind)
+function foldSrc(s) { return s.replace(/[^\x00-\x7f]/g, foldChar); }
+function lowerOf(s, L) { return L.fold ? foldText(s) : s.toLowerCase(); }
+
+// Wörterbücher mit fold: true werden einmal beim Laden in die Suchfassung gebracht.
+// Füllwörter und whatWord bleiben, wie sie sind - sie arbeiten auf dem Originaltext.
+function foldLex(L) {
+  function keys(o) { var r = {}; Object.keys(o).forEach(function (k) { r[foldText(k)] = o[k]; }); return r; }
+  function list(a) { return a.map(foldText); }
+  ["months", "weekdays", "nums", "counts", "ordinals", "parts", "partsAfter"].forEach(function (k) { if (L[k]) L[k] = keys(L[k]); });
+  ["pre", "partPre", "monthPre", "numMonthPre", "wdPre", "dmJoin", "yJoin", "inWord", "inAfter", "suffix"].forEach(function (k) { if (L[k]) L[k] = foldSrc(L[k]); });
+  ["today", "tomorrow", "dayAfter", "preCut"].forEach(function (k) { if (L[k]) L[k] = list(L[k]); });
+  Object.keys(L.units).forEach(function (k) { L.units[k] = list(L.units[k]); });
+  L.rel = L.rel.map(function (r) { return [list(r[0]), r[1]]; });
+  L.keywords = L.keywords.map(function (k) { return [k[0], list(k[1])]; });
+  ["pm", "am", "dueWords", "wdNext"].forEach(function (k) { if (L[k]) L[k] = new RegExp(foldSrc(L[k].source), L[k].flags); });
+  var times = L.times;
+  L.times = function (H, hourOf) { return times(H, hourOf).map(function (p) { return [foldSrc(p[0]), p[1]]; }); };
+  return L;
+}
+
+// Polnische Ordnungszahlen im Genitiv für Tage: "trzeciego listopada", "dwudziestego pierwszego"
+function polishOrdinals() {
+  var w = ["pierwszego", "drugiego", "trzeciego", "czwartego", "piątego", "szóstego", "siódmego", "ósmego", "dziewiątego"];
+  var o = {
+    dziesiątego: 10, jedenastego: 11, dwunastego: 12, trzynastego: 13, czternastego: 14, "piętnastego": 15,
+    szesnastego: 16, siedemnastego: 17, osiemnastego: 18, "dziewiętnastego": 19, dwudziestego: 20, trzydziestego: 30
+  };
+  w.forEach(function (x, i) { o[x] = i + 1; o["dwudziestego " + x] = 21 + i; });
+  o["trzydziestego pierwszego"] = 31;
+  return o;
+}
+
 // Zahlwörter "twenty-first", "twenty first" usw. für 21–31
 function englishOrdinals() {
   var o = { first: 1, second: 2, third: 3, fourth: 4, fifth: 5, sixth: 6, seventh: 7, eighth: 8, ninth: 9, tenth: 10,
@@ -114,7 +159,7 @@ LEX.en = {
   nums: { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12 },
   counts: { a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12 },
   ordinals: englishOrdinals(),
-  ordSuffix: true,              // "3rd" -> "3"
+  ordSuffix: /(\d+)(?:st|nd|rd|th)\b/gi,   // "3rd" -> "3"
   pre: "(?:on |by |until |till |before |from |on the |by the |the )*",
   dmJoin: "(?:of )?",           // "3rd of March"
   monthDay: true,               // "March 3", "March 3rd"
@@ -175,15 +220,645 @@ LEX.en = {
   whatSkip: []
 };
 
+/* ---------- Italienisch ---------- */
+LEX.it = {
+  fold: true, elide: true, prep: splitElision,
+  months: {
+    gennaio: 1, febbraio: 2, marzo: 3, aprile: 4, maggio: 5, giugno: 6, luglio: 7, agosto: 8,
+    settembre: 9, ottobre: 10, novembre: 11, dicembre: 12,
+    gen: 1, feb: 2, apr: 4, giu: 6, lug: 7, sett: 9, ott: 10, nov: 11, dic: 12
+  },
+  weekdays: { domenica: 0, "lunedì": 1, "martedì": 2, "mercoledì": 3, "giovedì": 4, "venerdì": 5, sabato: 6 },
+  nums: { una: 1, uno: 1, due: 2, tre: 3, quattro: 4, cinque: 5, sei: 6, sette: 7, otto: 8, nove: 9, dieci: 10, undici: 11, dodici: 12 },
+  counts: { un: 1, uno: 1, una: 1, due: 2, tre: 3, quattro: 4, cinque: 5, sei: 6, sette: 7, otto: 8, nove: 9, dieci: 10, undici: 11, dodici: 12, quindici: 15, venti: 20, trenta: 30 },
+  ordinals: { primo: 1 },
+  pre: "(?:il |entro |fino |al |dal |per |a partire |l' |dall' |all' |giorno )*",
+  parts: {
+    fine: "end", "fine di": "end", "alla fine di": "end", "a fine": "end", inizio: "start", "inizio di": "start",
+    "all' inizio di": "start", "a inizio": "start", "metà": "mid", "a metà": "mid", "metà di": "mid"
+  },
+  partPre: "(?:entro |per |verso )?",
+  monthPre: "(?:a |ad |in |entro |fino a |da |per |nel mese di |di )?", numMonthPre: "(?:a |entro |in )?",
+  today: ["oggi", "stasera", "stamattina", "stamani", "stanotte"], tomorrow: ["domani", "domattina"], dayAfter: ["dopodomani", "dopo domani"],
+  inWord: "(?:tra|fra|entro)", units: { day: ["giorni", "giorno"], week: ["settimane", "settimana"], month: ["mesi", "mese"], year: ["anni", "anno"] },
+  rel: [[["la settimana prossima", "la prossima settimana", "settimana prossima", "prossima settimana"], { days: 7 }],
+    [["il mese prossimo", "il prossimo mese", "mese prossimo", "prossimo mese"], { months: 1 }],
+    [["l' anno prossimo", "il prossimo anno", "anno prossimo", "prossimo anno"], { months: 12 }]],
+  wdPre: "(?:il |la |di |entro |per |fino a |questo |questa |prossimo |prossima )*", wdNext: /prossim/,
+  // "alle 10", "alle 10:30", "all'una", "alle 3 e mezza", "alle 4 meno un quarto", "a mezzogiorno"
+  times: function (H, hourOf) {
+    var AT = " (?:alle |all' |verso le |verso l' |dalle |dall' |per le |per l' |entro le )?(?:ore )?";
+    function exact(m) { return { h: +m[1], m: m[2] ? +m[2] : 0, padded: /^0\d/.test(m[1]) }; }
+    return [
+      [AT + H + " e mezz[ao]", function (m) { return { h: hourOf(m[1]), m: 30 }; }],
+      [AT + H + " e (?:un )?quarto", function (m) { return { h: hourOf(m[1]), m: 15 }; }],
+      [AT + H + " meno (?:un )?quarto", function (m) { return { h: hourOf(m[1]) - 1, m: 45 }; }],
+      [AT + "(\\d{1,2}):(\\d{2})", exact],
+      [" (?:alle|all'|verso le|dalle|per le|entro le|ore)(?: ore)? (\\d{1,2})(?:\\.(\\d{2}))?", exact],
+      [" (?:alle |all' |verso le |verso l' |dalle |dall' |per le |per l' |entro le )(?:ore )?" + H, function (m) { return { h: hourOf(m[1]), m: 0 }; }],
+      [" (?:a )?mezzogiorno", function () { return { h: 12, m: 0, fixed: true }; }],
+      [" (?:a )?mezzanotte", function () { return { h: 0, m: 0, fixed: true }; }]
+    ];
+  },
+  pm: / (del pomeriggio|di pomeriggio|nel pomeriggio|pomeriggio|di sera|della sera|stasera|questa sera|sera)(?= )/,
+  am: / (del mattino|di mattina|la mattina|mattina|stamattina|stamani|domattina|di notte|notte)(?= )/,
+  dueWords: /richiamo|scade|scadenza|prossim/,
+  keywords: [
+    ["reisepass", ["passaporto"]],
+    ["fuehrerschein", ["patente"]],
+    ["aufenthaltstitel", ["permesso di soggiorno", "soggiorno", " visto "]],
+    ["personalausweis", ["carta d' identità", "carta di identità", "carta identità", "documento d' identità", " cie "]],
+    ["rechnung", ["bolletta", "fattura"]],
+    ["tuev", ["revisione"]],
+    ["zahnarzt", ["dentist", "igiene dentale", "pulizia dei denti"]],
+    ["checkup", ["check-up", "checkup", "check up", "esami del sangue", "screening", "controllo"]],
+    ["tetanus", ["tetano", "vaccin", "richiamo"]],
+    ["inspektion", ["tagliando", "cambio olio", "officina", "meccanico"]],
+    ["handy", ["contratto telefonico", "telefono", "cellulare", "internet", "fibra", " sim ", " tim ", "vodafone", " wind", "iliad"]],
+    ["strom", ["luce", "elettricità", " gas ", "energia", "enel"]],
+    ["abo", ["palestra", "abbonamento", "netflix", "spotify", "iscrizione"]],
+    ["versicherung", ["assicurazion", "polizza"]],
+    ["arzttermin", ["medico", "dottor", " dott", "visita", "fisioterap", "ospedale", "ambulatorio", "pediatra", "ginecolog", "oculista", "dermatolog"]],
+    ["rechnung", ["pagare", "bonifico", "affitto", " rata "]]
+  ],
+  fillers: [
+    "hey livo", "ehi livo", "ciao livo", "ok livo", "livo", "ricordami di", "ricordami che", "ricordami", "ricordarmi di",
+    "per favore", "del pomeriggio", "di pomeriggio", "di sera", "di mattina", "il mio", "la mia", "devo", "bisogna",
+    "mio", "mia", "miei", "mie", "il", "lo", "la", "i", "gli", "le", "l'", "di", "del", "della", "dei", "che", "scade", "scadenza",
+    "entro", "alle", "ore", "a", "al", "alla", "per", "e", "è", "fino", "dal", "un", "una", "tra", "fra", "prossimo", "prossima",
+    "pomeriggio", "sera", "mattina"
+  ],
+  whatWord: { versicherung: /assicurazione(?: [a-zàèéìòù]+)?/i, abo: /(palestra|netflix|spotify|dazn|abbonamento [a-zàèéìòù]+)/i },
+  whatSkip: ["assicurazione"]
+};
+
+/* ---------- Griechisch ---------- */
+LEX.el = {
+  fold: true,
+  ordSuffix: /(\d+)(?:ης|ου|η|ο)(?= |$)/g,   // "3η Νοεμβρίου" -> "3 Νοεμβρίου"
+  months: {
+    "ιανουάριος": 1, "ιανουαρίου": 1, "ιανουάριο": 1, "γενάρης": 1, "γενάρη": 1,
+    "φεβρουάριος": 2, "φεβρουαρίου": 2, "φεβρουάριο": 2, "φλεβάρης": 2, "φλεβάρη": 2,
+    "μάρτιος": 3, "μαρτίου": 3, "μάρτιο": 3, "μάρτης": 3, "μάρτη": 3,
+    "απρίλιος": 4, "απριλίου": 4, "απρίλιο": 4, "απρίλης": 4, "απρίλη": 4,
+    "μάιος": 5, "μαΐου": 5, "μάιο": 5, "μάης": 5, "μάη": 5,
+    "ιούνιος": 6, "ιουνίου": 6, "ιούνιο": 6, "ιούνης": 6, "ιούνη": 6,
+    "ιούλιος": 7, "ιουλίου": 7, "ιούλιο": 7, "ιούλης": 7, "ιούλη": 7,
+    "αύγουστος": 8, "αυγούστου": 8, "αύγουστο": 8,
+    "σεπτέμβριος": 9, "σεπτεμβρίου": 9, "σεπτέμβριο": 9, "σεπτέμβρης": 9, "σεπτέμβρη": 9,
+    "οκτώβριος": 10, "οκτωβρίου": 10, "οκτώβριο": 10, "οκτώβρης": 10, "οκτώβρη": 10,
+    "νοέμβριος": 11, "νοεμβρίου": 11, "νοέμβριο": 11, "νοέμβρης": 11, "νοέμβρη": 11,
+    "δεκέμβριος": 12, "δεκεμβρίου": 12, "δεκέμβριο": 12, "δεκέμβρης": 12, "δεκέμβρη": 12
+  },
+  weekdays: {
+    "κυριακή": 0, "δευτέρα": 1, "τρίτη": 2, "τετάρτη": 3, "πέμπτη": 4, "παρασκευή": 5, "σάββατο": 6,
+    "κυριακής": 0, "δευτέρας": 1, "τρίτης": 2, "τετάρτης": 3, "πέμπτης": 4, "παρασκευής": 5, "σαββάτου": 6
+  },
+  nums: {
+    "μία": 1, "μια": 1, "ένα": 1, "δύο": 2, "τρεις": 3, "τρία": 3, "τέσσερις": 4, "τέσσερα": 4, "πέντε": 5, "έξι": 6,
+    "επτά": 7, "εφτά": 7, "οκτώ": 8, "οχτώ": 8, "εννέα": 9, "εννιά": 9, "δέκα": 10, "έντεκα": 11, "ένδεκα": 11, "δώδεκα": 12
+  },
+  counts: {
+    "ένα": 1, "έναν": 1, "μία": 1, "μια": 1, "δύο": 2, "τρεις": 3, "τρία": 3, "τέσσερις": 4, "τέσσερα": 4, "πέντε": 5, "έξι": 6,
+    "επτά": 7, "εφτά": 7, "οκτώ": 8, "οχτώ": 8, "εννέα": 9, "εννιά": 9, "δέκα": 10, "δεκαπέντε": 15, "είκοσι": 20, "τριάντα": 30
+  },
+  ordinals: { "πρώτη": 1 },
+  pre: "(?:στις |στη |στην |τις |την |τη |μέχρι |ως |έως |από |πριν |για |της )*",
+  yJoin: "(?:του )?",
+  parts: {
+    "τέλη": "end", "στα τέλη": "end", "τέλη του": "end", "στα τέλη του": "end", "τέλος": "end", "τέλος του": "end", "στο τέλος του": "end",
+    "αρχές": "start", "στις αρχές": "start", "αρχές του": "start", "στις αρχές του": "start", "αρχή του": "start", "στην αρχή του": "start",
+    "μέσα": "mid", "στα μέσα": "mid", "μέσα του": "mid", "στα μέσα του": "mid"
+  },
+  partPre: "(?:μέχρι |ως |έως |για |από )?",
+  monthPre: "(?:τον |το |μέσα στον |στον |μέχρι τον |ως τον |έως τον |από τον |για τον |του )?", numMonthPre: "(?:τον |στο |μέχρι |ως |έως )?",
+  today: ["σήμερα", "απόψε"], tomorrow: ["αύριο"], dayAfter: ["μεθαύριο"],
+  inWord: "(?:μέσα σε|σε)",
+  units: { day: ["μέρες", "ημέρες", "μέρα", "ημέρα"], week: ["εβδομάδες", "εβδομάδα", "βδομάδες", "βδομάδα"], month: ["μήνες", "μήνα", "μήνας"], year: ["χρόνια", "χρόνο", "χρόνος", "έτη", "έτος"] },
+  rel: [[["την άλλη εβδομάδα", "την επόμενη εβδομάδα", "την ερχόμενη εβδομάδα", "την άλλη βδομάδα", "την επόμενη βδομάδα", "άλλη εβδομάδα", "επόμενη εβδομάδα", "άλλη βδομάδα"], { days: 7 }],
+    [["τον άλλο μήνα", "τον επόμενο μήνα", "τον ερχόμενο μήνα", "άλλο μήνα", "επόμενο μήνα"], { months: 1 }],
+    [["του χρόνου", "τον άλλο χρόνο", "τον επόμενο χρόνο", "το επόμενο έτος", "επόμενο χρόνο", "άλλο χρόνο"], { months: 12 }]],
+  wdPre: "(?:την |τη |το |μέχρι |ως |έως |από |για |επόμενη |επόμενο |άλλη |άλλο |ερχόμενη |ερχόμενο |αυτή |αυτό |αυτήν |της |του )*",
+  wdNext: /επόμεν|άλλη|άλλο|ερχόμεν/,
+  // "στις 10", "στις 10:30", "στη μία", "στις 3 και μισή", "στις 4 παρά τέταρτο"
+  times: function (H, hourOf) {
+    var AT = " (?:στις |στη |γύρω στις |κατά τις |από τις |μέχρι τις )?";
+    function exact(m) { return { h: +m[1], m: m[2] ? +m[2] : 0, padded: /^0\d/.test(m[1]) }; }
+    return [
+      [AT + H + " και μισή", function (m) { return { h: hourOf(m[1]), m: 30 }; }],
+      [AT + H + " και τέταρτο", function (m) { return { h: hourOf(m[1]), m: 15 }; }],
+      [AT + H + " παρά τέταρτο", function (m) { return { h: hourOf(m[1]) - 1, m: 45 }; }],
+      [AT + "(\\d{1,2}):(\\d{2})", exact],
+      [" (?:στις|στη|γύρω στις|κατά τις|από τις|μέχρι τις) (\\d{1,2})(?:\\.(\\d{2}))?", exact],
+      [" (?:στις|στη|γύρω στις|κατά τις|από τις|μέχρι τις) " + H, function (m) { return { h: hourOf(m[1]), m: 0 }; }],
+      [" (?:τα )?μεσάνυχτα", function () { return { h: 0, m: 0, fixed: true }; }],
+      [" (?:το )?μεσημέρι", function () { return { h: 12, m: 0, fixed: true }; }]
+    ];
+  },
+  pm: / (το απόγευμα|απόγευμα|το βράδυ|βράδυ|απόψε|το μεσημέρι|μεσημέρι|μ\.μ\.|μμ)(?= )/,
+  am: / (το πρωί|πρωί|τα ξημερώματα|ξημερώματα|τη νύχτα|νύχτα|π\.μ\.|πμ)(?= )/,
+  dueWords: /αναμνηστικ|λήγει|λήξη|επόμεν/,
+  keywords: [
+    ["reisepass", ["διαβατήριο"]],
+    ["fuehrerschein", ["δίπλωμα", "άδεια οδήγησης"]],
+    ["aufenthaltstitel", ["άδεια διαμονής", "διαμονής", "βίζα", "θεώρηση"]],
+    ["personalausweis", ["ταυτότητ"]],
+    ["rechnung", ["λογαριασμ", "τιμολόγ"]],
+    ["tuev", ["κτεο"]],
+    ["zahnarzt", ["οδοντίατρ", "δόντια", "δοντιών"]],
+    ["checkup", ["τσεκ απ", "τσεκ-απ", "check-up", "checkup", "check up", "εξετάσεις", "αιματολογικ"]],
+    ["tetanus", ["τέτανο", "αντιτετανικ", "εμβόλι", "αναμνηστική"]],
+    ["inspektion", ["σέρβις", "service", "λάδια", "συνεργείο"]],
+    // Versicherung vor Handy: "ασφάλεια αυτοκινήτου" enthält "κινητ"
+    ["versicherung", ["ασφάλεια", "ασφάλισ", "ασφαλιστ"]],
+    ["handy", [" κινητ", "τηλέφων", "ίντερνετ", "internet", "cosmote", "vodafone", " nova ", " wind "]],
+    ["strom", ["ρεύμα", "ρεύματος", "ηλεκτρικ", "φυσικό αέριο", "αερίου", "ενέργεια", " δεη "]],
+    ["abo", ["γυμναστήριο", "συνδρομή", "netflix", "spotify"]],
+    ["arzttermin", ["γιατρ", "ιατρ", "παθολόγ", "καρδιολόγ", "γυναικολόγ", "παιδίατρ", "οφθαλμίατρ", "δερματολόγ", "φυσικοθεραπ", "νοσοκομείο", "κλινική"]],
+    ["rechnung", ["πληρωμή", "πληρώσω", "πλήρωσε", "ενοίκιο", "νοίκι", "έμβασμα"]]
+  ],
+  fillers: [
+    "hey livo", "χέι λίβο", "χεϊ λίβο", "γεια σου λίβο", "γεια σου livo", "λίβο", "livo",
+    "θύμισέ μου να", "θύμισέ μου ότι", "θύμισέ μου", "θύμισε μου να", "θύμισε μου", "υπενθύμισέ μου", "πρέπει να",
+    "το απόγευμα", "το βράδυ", "το πρωί", "το μεσημέρι", "παρακαλώ", "μου", "η", "ο", "το", "τα", "τη", "την", "τον", "του", "της",
+    "τις", "στις", "στο", "στη", "στην", "στον", "λήγει", "μέχρι", "ως", "έως", "και", "να", "ότι", "πρέπει", "είναι", "ώρα"
+  ],
+  whatWord: { versicherung: /ασφάλεια (?:του |της )?[α-ωάέήίόύώϊϋΐΰ]+/i, abo: /(γυμναστήριο|netflix|spotify|συνδρομή [α-ωάέήίόύώ]+)/i },
+  whatSkip: []
+};
+
+/* ---------- Spanisch ---------- */
+LEX.es = {
+  fold: true, todayFirst: true,
+  months: {
+    enero: 1, febrero: 2, marzo: 3, abril: 4, mayo: 5, junio: 6, julio: 7, agosto: 8, septiembre: 9, setiembre: 9,
+    octubre: 10, noviembre: 11, diciembre: 12, ene: 1, feb: 2, abr: 4, jun: 6, jul: 7, sept: 9, oct: 10, nov: 11, dic: 12
+  },
+  weekdays: { domingo: 0, lunes: 1, martes: 2, "miércoles": 3, jueves: 4, viernes: 5, "sábado": 6 },
+  nums: { una: 1, uno: 1, dos: 2, tres: 3, cuatro: 4, cinco: 5, seis: 6, siete: 7, ocho: 8, nueve: 9, diez: 10, once: 11, doce: 12 },
+  counts: { un: 1, una: 1, uno: 1, dos: 2, tres: 3, cuatro: 4, cinco: 5, seis: 6, siete: 7, ocho: 8, nueve: 9, diez: 10, once: 11, doce: 12, quince: 15, veinte: 20, treinta: 30 },
+  ordinals: { primero: 1 },
+  pre: "(?:el |hasta |antes |del |de |desde |para |a partir |a |al |día )*",
+  dmJoin: "(?:de )?", yJoin: "(?:de |del )?",
+  parts: {
+    "finales de": "end", "a finales de": "end", "fin de": "end", "a fin de": "end", "final de": "end", "al final de": "end",
+    "principios de": "start", "a principios de": "start", "comienzos de": "start", "inicio de": "start", "a inicios de": "start",
+    "mediados de": "mid", "a mediados de": "mid"
+  },
+  partPre: "(?:para |hasta |antes de )?",
+  monthPre: "(?:en |para |hasta |antes de |a partir de |desde |de |durante )?", numMonthPre: "(?:en |para |hasta )?",
+  today: ["hoy", "esta noche", "esta tarde", "esta mañana"], tomorrow: ["mañana"], dayAfter: ["pasado mañana"],
+  preCut: ["por la mañana", "de la mañana", "en la mañana"],
+  inWord: "(?:dentro de|en)", units: { day: ["días", "día"], week: ["semanas", "semana"], month: ["meses", "mes"], year: ["años", "año"] },
+  rel: [[["la semana que viene", "la próxima semana", "la semana próxima", "semana que viene", "próxima semana"], { days: 7 }],
+    [["el mes que viene", "el próximo mes", "el mes próximo", "mes que viene", "próximo mes"], { months: 1 }],
+    [["el año que viene", "el próximo año", "el año próximo", "año que viene", "próximo año"], { months: 12 }]],
+  wdPre: "(?:el |este |esta |hasta |antes del |para el |próximo )*", wdNext: /próxim/,
+  // "a las 10", "a las 10:30", "a la una", "a las 3 y media", "a las 4 menos cuarto", "al mediodía"
+  times: function (H, hourOf) {
+    var P = "(?:a las|a la|sobre las|sobre la|hacia las|hacia la|desde las|para las|antes de las|a eso de las)";
+    var AT = " (?:" + P + " )?";
+    function exact(m) { return { h: +m[1], m: m[2] ? +m[2] : 0, padded: /^0\d/.test(m[1]) }; }
+    return [
+      [AT + H + " y media", function (m) { return { h: hourOf(m[1]), m: 30 }; }],
+      [AT + H + " y cuarto", function (m) { return { h: hourOf(m[1]), m: 15 }; }],
+      [AT + H + " menos cuarto", function (m) { return { h: hourOf(m[1]) - 1, m: 45 }; }],
+      [AT + "(\\d{1,2}):(\\d{2})(?: h| horas)?", exact],
+      [" " + P + " (\\d{1,2})(?:\\.(\\d{2}))?(?: h| horas?| en punto)?", exact],
+      [" " + P + " " + H + "(?: en punto)?", function (m) { return { h: hourOf(m[1]), m: 0 }; }],
+      [" (?:al |a )?mediodía", function () { return { h: 12, m: 0, fixed: true }; }],
+      [" (?:a )?medianoche", function () { return { h: 0, m: 0, fixed: true }; }]
+    ];
+  },
+  pm: / (de la tarde|por la tarde|esta tarde|de la noche|por la noche|esta noche|pm)(?= )/,
+  am: / (de la mañana|por la mañana|en la mañana|esta mañana|de la madrugada|madrugada|am)(?= )/,
+  dueWords: /refuerzo|vence|vencimiento|caduca|próxim|toca/,
+  keywords: [
+    ["reisepass", ["pasaporte"]],
+    ["personalausweis", [" dni ", "documento de identidad", "documento nacional", "carnet de identidad", "carné de identidad", "cédula"]],
+    ["fuehrerschein", ["carnet de conducir", "carné de conducir", "permiso de conducir", "licencia de conducir", "carnet", "carné"]],
+    ["aufenthaltstitel", ["permiso de residencia", "tarjeta de residencia", "residencia", " tie ", " nie ", "visado"]],
+    ["rechnung", ["factura", "recibo"]],
+    ["tuev", [" itv ", "inspección técnica", "revisión técnica"]],
+    ["zahnarzt", ["dentista", "dental", "limpieza de dientes"]],
+    ["checkup", ["chequeo", "revisión médica", "reconocimiento médico", "check-up", "checkup", "análisis de sangre", "analítica"]],
+    ["tetanus", ["tétanos", "vacuna", "refuerzo"]],
+    ["inspektion", ["revisión del coche", "revisión", "cambio de aceite", "taller", "mantenimiento"]],
+    ["handy", ["contrato de móvil", "móvil", "teléfono", "fibra", "internet", "movistar", "vodafone", "orange", "jazztel"]],
+    ["strom", ["luz", "electricidad", " gas ", "energía", "iberdrola", "endesa", "naturgy"]],
+    ["abo", ["gimnasio", "suscripción", "netflix", "spotify", "abono", "membresía", "cuota"]],
+    ["versicherung", ["seguro", "póliza"]],
+    ["arzttermin", ["médico", "médica", "doctor", "cita médica", "fisio", "clínica", "hospital", "consulta", "centro de salud", "pediatra", "ginecólog", "oculista", "dermatólog"]],
+    ["rechnung", [" pagar ", "transferencia", "alquiler"]]
+  ],
+  fillers: [
+    "hey livo", "oye livo", "hola livo", "ok livo", "livo", "recuérdame que", "recuérdame", "recuerdame que", "recuerdame",
+    "por favor", "tengo que", "hay que", "por la tarde", "por la noche", "de la tarde", "de la noche", "de la mañana", "en punto",
+    "mi", "mis", "el", "la", "los", "las", "de", "del", "que", "caduca", "vence", "hasta", "antes", "a", "al", "para", "y",
+    "es", "en", "dentro", "próximo", "próxima", "tarde", "noche", "horas", "hora"
+  ],
+  whatWord: { versicherung: /seguro(?: [a-záéíóúñ]+)?/i, abo: /(gimnasio|netflix|spotify|suscripción [a-záéíóúñ]+)/i },
+  whatSkip: ["seguro"]
+};
+
+/* ---------- Französisch ---------- */
+LEX.fr = {
+  fold: true, elide: true,
+  prep: function (s) { return splitElision(s).replace(/\bmi-/gi, "mi "); },
+  ordSuffix: /(\d+)(?:ère|ème|er|re|eme|e)(?= |$)/gi,   // "1er", "3e" -> "1", "3"
+  months: {
+    janvier: 1, "février": 2, mars: 3, avril: 4, mai: 5, juin: 6, juillet: 7, "août": 8, septembre: 9, octobre: 10,
+    novembre: 11, "décembre": 12, janv: 1, "févr": 2, avr: 4, juil: 7, sept: 9, oct: 10, nov: 11, "déc": 12
+  },
+  weekdays: { dimanche: 0, lundi: 1, mardi: 2, mercredi: 3, jeudi: 4, vendredi: 5, samedi: 6 },
+  nums: { une: 1, un: 1, deux: 2, trois: 3, quatre: 4, cinq: 5, six: 6, sept: 7, huit: 8, neuf: 9, dix: 10, onze: 11, douze: 12 },
+  counts: { un: 1, une: 1, deux: 2, trois: 3, quatre: 4, cinq: 5, six: 6, sept: 7, huit: 8, neuf: 9, dix: 10, onze: 11, douze: 12, quinze: 15, vingt: 20, trente: 30 },
+  ordinals: { premier: 1 },
+  pre: "(?:le |l' |au |du |jusqu' au |jusqu' |avant |à partir du |d' ici |pour |dès )*",
+  parts: {
+    fin: "end", "fin de": "end", "fin d'": "end", "à la fin de": "end", "à la fin d'": "end", "la fin de": "end", "la fin d'": "end",
+    "début": "start", "début de": "start", "début d'": "start", "au début de": "start", "au début d'": "start", "le début de": "start", "le début d'": "start",
+    mi: "mid", "à la mi": "mid", "milieu de": "mid", "au milieu de": "mid"
+  },
+  partPre: "(?:d' ici |avant |pour |vers |jusqu' à )?",
+  monthPre: "(?:en |au mois de |au mois d' |d' ici |avant |pour |courant |dès |à partir de |à partir d' |jusqu' en )?", numMonthPre: "(?:en |d' ici |avant )?",
+  today: ["aujourd' hui", "ce soir", "ce matin", "cet après-midi", "cette nuit"], tomorrow: ["demain"], dayAfter: ["après-demain", "après demain"],
+  inWord: "(?:dans|d' ici)", units: { day: ["jours", "jour"], week: ["semaines", "semaine"], month: ["mois"], year: ["années", "année", "ans", "an"] },
+  rel: [[["la semaine prochaine", "semaine prochaine"], { days: 7 }],
+    [["le mois prochain", "mois prochain"], { months: 1 }],
+    [["l' année prochaine", "l' an prochain", "année prochaine", "an prochain"], { months: 12 }]],
+  wdPre: "(?:le |ce |d' ici |avant |jusqu' à |jusqu' au |pour |dès |à partir de )*", wdNext: null,
+  // "à 15 h", "à 15h30", "à 15:30", "à 3 heures et demie", "à 4 heures moins le quart", "à midi"
+  times: function (H, hourOf) {
+    var AT = " (?:à |vers |dès |avant |pour |jusqu' à )?";
+    function exact(m) { return { h: +m[1], m: m[2] ? +m[2] : 0, padded: /^0\d/.test(m[1]) }; }
+    return [
+      [AT + H + " ?(?:h|heures?) et demie?", function (m) { return { h: hourOf(m[1]), m: 30 }; }],
+      [AT + H + " ?(?:h|heures?) et quart", function (m) { return { h: hourOf(m[1]), m: 15 }; }],
+      [AT + H + " ?(?:h|heures?) moins (?:le )?quart", function (m) { return { h: hourOf(m[1]) - 1, m: 45 }; }],
+      [AT + "midi et demie?", function () { return { h: 12, m: 30, fixed: true }; }],
+      [AT + "(\\d{1,2}) ?(?:h|heures?)(?: ?(\\d{2}))?", exact],
+      [AT + "(\\d{1,2}):(\\d{2})", exact],
+      [AT + H + " heures?", function (m) { return { h: hourOf(m[1]), m: 0 }; }],
+      [AT + "midi", function () { return { h: 12, m: 0, fixed: true }; }],
+      [AT + "minuit", function () { return { h: 0, m: 0, fixed: true }; }]
+    ];
+  },
+  pm: / (de l' après-midi|l' après-midi|cet après-midi|après-midi|du soir|ce soir|le soir|soir)(?= )/,
+  am: / (du matin|ce matin|le matin|matin|de la nuit|cette nuit)(?= )/,
+  dueWords: /rappel|expire|échéance|prochain/,
+  keywords: [
+    ["reisepass", ["passeport"]],
+    ["personalausweis", ["carte d' identité", "carte identité", "pièce d' identité", " cni "]],
+    ["fuehrerschein", ["permis de conduire", "permis"]],
+    ["aufenthaltstitel", ["titre de séjour", "carte de séjour", "séjour", " visa "]],
+    ["rechnung", ["facture"]],
+    ["tuev", ["contrôle technique"]],
+    ["zahnarzt", ["dentiste", "dentaire", "détartrage"]],
+    ["checkup", ["bilan de santé", "check-up", "checkup", "bilan", "dépistage", "prise de sang"]],
+    ["tetanus", ["tétanos", "vaccin", " rappel "]],
+    ["inspektion", ["révision", "vidange", "entretien de la voiture", "entretien voiture", "garage"]],
+    ["handy", ["forfait", "téléphon", "portable", "mobile", " box ", "internet", "fibre", " sfr ", "orange", "bouygues", " free "]],
+    ["strom", ["électricité", "électrique", " gaz ", "énergie", " edf ", "engie"]],
+    ["abo", ["salle de sport", "abonnement", "netflix", "spotify", "adhésion", " gym ", " sport "]],
+    ["versicherung", ["assurance", "mutuelle"]],
+    ["arzttermin", ["médecin", "docteur", " dr ", "kiné", "généraliste", "hôpital", "clinique", "cabinet", "ophtalmo", "gynéco", "dermato", "pédiatre"]],
+    ["rechnung", [" payer ", "virement", "loyer", " régler "]]
+  ],
+  fillers: [
+    "hey livo", "salut livo", "ok livo", "livo", "rappelle-moi de", "rappelle-moi d'", "rappelle-moi que", "rappelle-moi",
+    "rappelle moi", "n' oublie pas de", "n' oublie pas", "s' il te plaît", "s' il vous plaît", "il faut que", "il faut",
+    "je dois", "de l' après-midi", "l' après-midi", "du soir", "du matin", "expire le", "se termine le", "expire", "se termine",
+    "échéance", "d' ici", "mon", "ma", "mes", "le", "la", "les", "l'", "de", "du", "des", "à", "au", "aux", "que", "qu'", "avant",
+    "jusqu'", "pour", "et", "est", "dans", "ce", "cet", "cette", "prochain", "prochaine", "heures", "heure", "h", "soir", "matin"
+  ],
+  whatWord: { versicherung: /assurance(?: [a-zàâçéèêëîïôûùüÿœ]+)?/i, abo: /(salle de sport|netflix|spotify|abonnement [a-zàâçéèêëîïôûùüÿœ]+)/i },
+  whatSkip: ["assurance"]
+};
+
+/* ---------- Niederländisch ---------- */
+LEX.nl = {
+  fold: true,
+  ordSuffix: /(\d+)(?:ste|de|e)(?= |$)/gi,   // "3e", "1ste" -> "3", "1"
+  months: {
+    januari: 1, februari: 2, maart: 3, april: 4, mei: 5, juni: 6, juli: 7, augustus: 8, september: 9, oktober: 10,
+    november: 11, december: 12, jan: 1, feb: 2, mrt: 3, apr: 4, jun: 6, jul: 7, aug: 8, sep: 9, sept: 9, okt: 10, nov: 11, dec: 12
+  },
+  weekdays: { zondag: 0, maandag: 1, dinsdag: 2, woensdag: 3, donderdag: 4, vrijdag: 5, zaterdag: 6 },
+  nums: { "één": 1, een: 1, twee: 2, drie: 3, vier: 4, vijf: 5, zes: 6, zeven: 7, acht: 8, negen: 9, tien: 10, elf: 11, twaalf: 12 },
+  counts: { "één": 1, een: 1, twee: 2, drie: 3, vier: 4, vijf: 5, zes: 6, zeven: 7, acht: 8, negen: 9, tien: 10, elf: 11, twaalf: 12, vijftien: 15, twintig: 20, dertig: 30 },
+  ordinals: { eerste: 1 },
+  pre: "(?:op |tot |tot en met |t/m |vanaf |voor |uiterlijk |per |de )*",
+  parts: { eind: "end", einde: "end", "eind van": "end", "aan het eind van": "end", begin: "start", "begin van": "start", "aan het begin van": "start", half: "mid", medio: "mid", midden: "mid", "midden van": "mid" },
+  partPre: "(?:tot |voor |uiterlijk )?",
+  monthPre: "(?:in |tot |vanaf |voor |uiterlijk |in de maand )?", numMonthPre: "(?:in |tot |voor )?",
+  today: ["vandaag", "vanavond", "vanmiddag", "vanochtend", "vanmorgen", "vannacht"],
+  tomorrow: ["morgen", "morgenochtend", "morgenmiddag", "morgenavond", "morgenvroeg"], dayAfter: ["overmorgen"],
+  inWord: "(?:over|binnen)", units: { day: ["dagen", "dag"], week: ["weken", "week"], month: ["maanden", "maand"], year: ["jaren", "jaar"] },
+  rel: [[["volgende week", "komende week"], { days: 7 }], [["volgende maand", "komende maand"], { months: 1 }],
+    [["volgend jaar", "volgende jaar", "komend jaar"], { months: 12 }]],
+  wdPre: "(?:op |tot |vanaf |voor |uiterlijk |volgende |komende |aanstaande |deze )*", wdNext: /volgende|komende/,
+  // "om 10 uur", "om 10:30", "om half 4" (= 3:30), "kwart over 3", "kwart voor 4"
+  times: function (H, hourOf) {
+    var AT = " (?:om |rond |vanaf |tegen |omstreeks )?";
+    function exact(m) { return { h: +m[1], m: m[2] ? +m[2] : 0, padded: /^0\d/.test(m[1]) }; }
+    return [
+      [AT + "half " + H + "(?: uur)?", function (m) { return { h: hourOf(m[1]) - 1, m: 30 }; }],
+      [AT + "kwart over " + H, function (m) { return { h: hourOf(m[1]), m: 15 }; }],
+      [AT + "kwart voor " + H, function (m) { return { h: hourOf(m[1]) - 1, m: 45 }; }],
+      [AT + "(\\d{1,2})(?:[:.](\\d{2}))? ?uur", exact],
+      [AT + "(\\d{1,2}):(\\d{2})", exact],
+      [" (?:om|rond|vanaf|tegen|omstreeks) (\\d{1,2})\\.(\\d{2})", exact],
+      [" (?:om|rond|tegen|omstreeks) " + H + "(?: uur)?", function (m) { return { h: hourOf(m[1]), m: 0, padded: /^0\d/.test(m[1]) }; }],
+      [" (?:om )?middernacht", function () { return { h: 0, m: 0, fixed: true }; }]
+    ];
+  },
+  pm: / ('s middags|'s avonds|vanmiddag|vanavond|morgenmiddag|morgenavond|in de middag|in de avond|middag|avond)(?= )/,
+  am: / ('s ochtends|'s morgens|vanochtend|vanmorgen|morgenochtend|morgenvroeg|in de ochtend|'s nachts|ochtend|vannacht)(?= )/,
+  dueWords: /herhaling|verloopt|vervalt|volgende/,
+  keywords: [
+    ["reisepass", ["paspoort"]],
+    ["fuehrerschein", ["rijbewijs"]],
+    ["aufenthaltstitel", ["verblijfsvergunning", "verblijfsdocument", "visum"]],
+    ["personalausweis", ["identiteitskaart", "id-kaart", "id kaart", " id ", "identiteitsbewijs"]],
+    ["rechnung", ["rekening", "factuur", "acceptgiro"]],
+    ["tuev", [" apk ", "keuring"]],
+    ["zahnarzt", ["tandarts", "mondhygiën"]],
+    ["checkup", ["check-up", "checkup", "bevolkingsonderzoek", "bloedonderzoek"]],
+    ["tetanus", ["tetanus", "vaccinatie", "inenting", " prik "]],
+    ["inspektion", ["onderhoudsbeurt", "grote beurt", "kleine beurt", "garage", "olie verversen"]],
+    ["handy", ["telefoonabonnement", "mobiel abonnement", "sim only", "telefoon", "mobiel", "internet", "glasvezel", " kpn ", "vodafone", "odido", "ziggo"]],
+    ["strom", ["energiecontract", "energie", "stroom", " gas ", "elektriciteit"]],
+    ["abo", ["sportschool", "fitness", "abonnement", "netflix", "spotify", "lidmaatschap"]],
+    ["versicherung", ["verzekering"]],
+    ["arzttermin", ["dokter", "huisarts", " arts ", "specialist", "fysio", "ziekenhuis", "praktijk", " dr "]],
+    ["rechnung", [" betalen ", "overmaken", " huur "]]
+  ],
+  fillers: [
+    "hey livo", "hoi livo", "hallo livo", "ok livo", "livo", "herinner me eraan dat", "herinner me eraan", "herinner me aan",
+    "herinner me", "herinner mij", "denk eraan", "alsjeblieft", "ik moet", "'s middags", "'s avonds", "'s ochtends", "'s morgens",
+    "mijn", "m'n", "de", "het", "een", "aan", "op", "om", "tot", "voor", "is", "moet", "verloopt", "vervalt", "geldig", "uiterlijk",
+    "en", "uur", "dat", "eraan"
+  ],
+  whatWord: { versicherung: /\S*verzekering\S*/i, abo: /\S*(?:sportschool|fitness|netflix|spotify)\S*/i },
+  whatSkip: ["verzekering"]
+};
+
+/* ---------- Portugiesisch ---------- */
+LEX.pt = {
+  fold: true,
+  months: {
+    janeiro: 1, fevereiro: 2, "março": 3, abril: 4, maio: 5, junho: 6, julho: 7, agosto: 8, setembro: 9, outubro: 10,
+    novembro: 11, dezembro: 12, jan: 1, fev: 2, abr: 4, jun: 6, jul: 7, set: 9, out: 10, nov: 11, dez: 12
+  },
+  weekdays: {
+    domingo: 0, "segunda-feira": 1, segunda: 1, "terça-feira": 2, "terça": 2, "quarta-feira": 3, quarta: 3,
+    "quinta-feira": 4, quinta: 4, "sexta-feira": 5, sexta: 5, "sábado": 6
+  },
+  nums: { uma: 1, um: 1, duas: 2, dois: 2, "três": 3, quatro: 4, cinco: 5, seis: 6, sete: 7, oito: 8, nove: 9, dez: 10, onze: 11, doze: 12 },
+  counts: { um: 1, uma: 1, dois: 2, duas: 2, "três": 3, quatro: 4, cinco: 5, seis: 6, sete: 7, oito: 8, nove: 9, dez: 10, onze: 11, doze: 12, quinze: 15, vinte: 20, trinta: 30 },
+  ordinals: { primeiro: 1 },
+  pre: "(?:no |dia |até |ao |a |em |desde |partir |de |do |para |o )*",
+  dmJoin: "(?:de )?", yJoin: "(?:de )?",
+  parts: {
+    "fim de": "end", "no fim de": "end", "final de": "end", "no final de": "end", "finais de": "end", "nos finais de": "end", "fins de": "end",
+    "início de": "start", "no início de": "start", "princípio de": "start", "no princípio de": "start", "começo de": "start", "no começo de": "start",
+    "meados de": "mid", "em meados de": "mid"
+  },
+  partPre: "(?:até |para |antes de )?",
+  monthPre: "(?:em |no mês de |até |a partir de |para |durante |de )?", numMonthPre: "(?:em |até |para )?",
+  today: ["hoje", "esta noite", "esta tarde", "esta manhã"], tomorrow: ["amanhã"], dayAfter: ["depois de amanhã"],
+  inWord: "(?:daqui a|dentro de|em)", units: { day: ["dias", "dia"], week: ["semanas", "semana"], month: ["meses", "mês"], year: ["anos", "ano"] },
+  rel: [[["a próxima semana", "na próxima semana", "próxima semana", "semana que vem", "na semana que vem", "para a semana"], { days: 7 }],
+    [["o próximo mês", "no próximo mês", "próximo mês", "mês que vem", "no mês que vem"], { months: 1 }],
+    [["o próximo ano", "no próximo ano", "próximo ano", "ano que vem", "no ano que vem", "para o ano"], { months: 12 }]],
+  wdPre: "(?:na |no |até |até à |até ao |a |à |próxima |próximo |esta |este |nesta |neste |para |de )*", wdNext: /próxim/,
+  // "às 10", "às 10h30", "às 10:30", "à uma", "às 3 e meia", "às 4 menos um quarto", "ao meio-dia"
+  times: function (H, hourOf) {
+    var P = "(?:às|pelas|a partir das|por volta das|até às|antes das)";
+    var AT = " (?:" + P + " )?";
+    function exact(m) { return { h: +m[1], m: m[2] ? +m[2] : 0, padded: /^0\d/.test(m[1]) }; }
+    return [
+      [AT + H + " e meia", function (m) { return { h: hourOf(m[1]), m: 30 }; }],
+      [AT + H + " e (?:um )?quarto", function (m) { return { h: hourOf(m[1]), m: 15 }; }],
+      [AT + "(?:um )?quarto para as " + H, function (m) { return { h: hourOf(m[1]) - 1, m: 45 }; }],
+      [AT + H + " menos (?:um )?quarto", function (m) { return { h: hourOf(m[1]) - 1, m: 45 }; }],
+      [AT + "(\\d{1,2})(?: ?h ?|:)(\\d{2})", exact],
+      [" " + P + " (\\d{1,2})(?:\\.(\\d{2}))?(?: ?h(?:oras)?)?", exact],
+      [" (\\d{1,2}) ?h(?:oras)?", exact],
+      [" " + P + " " + H, function (m) { return { h: hourOf(m[1]), m: 0 }; }],
+      [" (?:à|pela) uma", function () { return { h: 1, m: 0 }; }],
+      [" (?:ao |a )?meio-dia", function () { return { h: 12, m: 0, fixed: true }; }],
+      [" (?:à |a )?meia-noite", function () { return { h: 0, m: 0, fixed: true }; }]
+    ];
+  },
+  pm: / (da tarde|à tarde|de tarde|esta tarde|da noite|à noite|de noite|esta noite)(?= )/,
+  am: / (da manhã|de manhã|pela manhã|esta manhã|da madrugada|de madrugada)(?= )/,
+  dueWords: /reforço|vence|expira|próxim|validade/,
+  keywords: [
+    ["reisepass", ["passaporte"]],
+    ["personalausweis", ["cartão de cidadão", " cc ", "bilhete de identidade", "carteira de identidade", " rg ", "documento de identidade"]],
+    ["fuehrerschein", ["carta de condução", "carteira de motorista", "carteira de habilitação", " cnh ", "habilitação"]],
+    ["aufenthaltstitel", ["autorização de residência", "título de residência", "residência"]],
+    ["rechnung", ["fatura", "factura", "boleto"]],
+    ["tuev", ["inspeção", "inspecção", " ipo ", "vistoria"]],
+    ["zahnarzt", ["dentista", "dentário", "higiene oral"]],
+    ["checkup", ["check-up", "checkup", "exames", "análises", "consulta de rotina"]],
+    ["tetanus", ["tétano", "vacina", "reforço"]],
+    ["inspektion", ["revisão", "mudança de óleo", "troca de óleo", "oficina"]],
+    ["handy", ["tarifário", "telemóvel", "celular", "telefone", "internet", "fibra", " meo ", "vodafone", " nos ", " vivo ", " tim ", " claro "]],
+    ["strom", [" luz ", "eletricidade", "electricidade", " gás ", "energia", " edp "]],
+    ["abo", ["ginásio", "academia", "assinatura", "subscrição", "netflix", "spotify", "mensalidade"]],
+    ["versicherung", ["seguro"]],
+    ["arzttermin", ["médico", "médica", "doutor", "doutora", "consulta", "fisioterap", "fisio", "clínica", "hospital", "centro de saúde", "pediatra", "ginecolog", "oftalmolog", "dermatolog"]],
+    ["rechnung", [" pagar ", "transferência", " renda ", "aluguel"]]
+  ],
+  fillers: [
+    "hey livo", "olá livo", "ola livo", "ok livo", "livo", "lembra-me de", "lembra-me que", "lembra-me", "lembre-me de", "lembre-me",
+    "me lembre de", "me lembra de", "por favor", "tenho de", "tenho que", "preciso de", "da tarde", "da noite", "da manhã", "de manhã",
+    "à tarde", "à noite", "o meu", "a minha", "meu", "minha", "meus", "minhas", "o", "a", "os", "as", "de", "do", "da", "dos", "das",
+    "que", "expira", "vence", "termina", "até", "ao", "à", "às", "para", "e", "é", "em", "no", "na", "dentro", "próximo", "próxima",
+    "tarde", "noite", "manhã", "horas", "hora", "dia"
+  ],
+  whatWord: { versicherung: /seguro(?: [a-záàâãçéêíóôõú]+)?/i, abo: /(ginásio|academia|netflix|spotify|assinatura [a-záàâãçéêíóôõú]+)/i },
+  whatSkip: ["seguro"]
+};
+
+/* ---------- Türkisch ---------- */
+LEX.tr = {
+  fold: true, suffix: "[a-z]*", wdBeforeRel: true,
+  // "Kasım'da", "10'da" -> "Kasım", "10" (Endungen nach Apostroph abschneiden)
+  prep: function (s) { return s.replace(/(\S)'[A-Za-zÇĞİÖŞÜçğıöşü]+/g, "$1"); },
+  months: { ocak: 1, "şubat": 2, mart: 3, nisan: 4, "mayıs": 5, haziran: 6, temmuz: 7, "ağustos": 8, "eylül": 9, ekim: 10, "kasım": 11, "aralık": 12 },
+  weekdays: { pazar: 0, pazartesi: 1, "salı": 2, "çarşamba": 3, "perşembe": 4, cuma: 5, cumartesi: 6 },
+  nums: { bir: 1, iki: 2, "üç": 3, "dört": 4, "beş": 5, "altı": 6, yedi: 7, sekiz: 8, dokuz: 9, on: 10, "on bir": 11, "on iki": 12 },
+  counts: { bir: 1, iki: 2, "üç": 3, "dört": 4, "beş": 5, "altı": 6, yedi: 7, sekiz: 8, dokuz: 9, on: 10, "on beş": 15, yirmi: 20, otuz: 30 },
+  pre: "(?:en geç |en son )?",
+  partsAfter: {
+    sonunda: "end", sonu: "end", sonuna: "end", sonlarında: "end", "başında": "start", "başı": "start", "başına": "start",
+    "başlarında": "start", "ortasında": "mid", "ortası": "mid", "ortalarında": "mid"
+  },
+  monthPre: "", numMonthPre: "",
+  today: ["bugün", "bu akşam", "bu gece", "bu sabah"], tomorrow: ["yarın"], dayAfter: ["öbür gün", "yarından sonra"],
+  inAfter: "sonra|içinde", units: { day: ["gün"], week: ["hafta"], month: ["ay"], year: ["yıl", "sene"] },
+  rel: [[["haftaya", "gelecek hafta", "önümüzdeki hafta"], { days: 7 }], [["gelecek ay", "önümüzdeki ay"], { months: 1 }],
+    [["gelecek yıl", "önümüzdeki yıl", "seneye", "gelecek sene", "önümüzdeki sene"], { months: 12 }]],
+  wdPre: "(?:gelecek |önümüzdeki |bu |haftaya |en geç )*", wdNext: /gelecek|önümüzdeki|haftaya/,
+  // "saat 10", "saat 10:30", "saat üçte", "saat 3 buçukta", "3 çeyrek geçe", "4 çeyrek kala", "akşam 7"
+  // "akşam 8" / "sabah 9" (ohne "saat") gehören zur Uhrzeit und werden mit ihr herausgeschnitten -
+  // deshalb dort pm/am setzen. Mit "saat" bleibt "bu akşam" stehen und wird als "heute" erkannt.
+  times: function (H, hourOf) {
+    var PM = " (?:akşam|öğleden sonra) ", AM = " (?:sabah|gece) ";
+    function exact(m) { return { h: +m[1], m: m[2] ? +m[2] : 0, padded: /^0\d/.test(m[1]) }; }
+    function with_(ampm, f) { return function (m) { var r = f(m); r.ampm = ampm; return r; }; }
+    function word(m) { return { h: hourOf(m[1]), m: 0 }; }
+    return [
+      [" (?:saat )?" + H + "[a-z]* buçuk[a-z]*", function (m) { return { h: hourOf(m[1]), m: 30 }; }],
+      [" (?:saat )?" + H + "[a-z]* çeyrek geçe", function (m) { return { h: hourOf(m[1]), m: 15 }; }],
+      [" (?:saat )?" + H + "[a-z]* çeyrek kala", function (m) { return { h: hourOf(m[1]) - 1, m: 45 }; }],
+      [" saat (\\d{1,2})(?:[:.](\\d{2}))?", exact],
+      [" (\\d{1,2}):(\\d{2})", exact],
+      [" saat " + H + "[a-z]*", word],
+      [PM + "(\\d{1,2})(?:[:.](\\d{2}))?", with_("pm", exact)],
+      [AM + "(\\d{1,2})(?:[:.](\\d{2}))?", with_("am", exact)],
+      [PM + H + "[a-z]*", with_("pm", word)],
+      [AM + H + "[a-z]*", with_("am", word)],
+      [" öğle(?:n|yin)", function () { return { h: 12, m: 0, fixed: true }; }],
+      [" gece yarısı[a-z]*", function () { return { h: 0, m: 0, fixed: true }; }]
+    ];
+  },
+  pm: / (akşam|akşamleyin|akşamüstü|öğleden sonra|bu akşam)(?= )/,
+  am: / (sabah|sabahleyin|bu sabah|gece)(?= )/,
+  dueWords: /hatırlatma|bitiyor|doluyor|sonraki|gelecek/,
+  keywords: [
+    ["reisepass", ["pasaport"]],
+    ["fuehrerschein", ["ehliyet", "sürücü belgesi"]],
+    ["aufenthaltstitel", ["oturma izni", "ikamet", " vize"]],
+    ["personalausweis", ["kimli", "nüfus cüzdan"]],
+    ["rechnung", ["fatura"]],
+    ["tuev", ["araç muayene", "araba muayene", "muayene istasyon", "tüvtürk"]],
+    ["zahnarzt", [" diş ", "dişçi", "diş hekim", "diş muayene", "diş kontrol"]],
+    ["checkup", ["check-up", "checkup", "check up", "kontrol", "tahlil", "sağlık taraması"]],
+    ["tetanus", ["tetanoz", " aşı"]],
+    ["arzttermin", ["doktor", "hastane", "hekim", "fizik tedavi", "klinik", "muayene"]],
+    ["inspektion", ["bakım", "yağ değişim", "servis", "tamirci"]],
+    ["handy", ["telefon", " cep ", "internet", "fiber", "turkcell", "vodafone", "türk telekom", " hat "]],
+    ["strom", ["elektrik", "doğalgaz", "doğal gaz", "enerji"]],
+    ["abo", ["spor salonu", "üyelik", "abonelik", "netflix", "spotify", " gym "]],
+    ["versicherung", ["sigorta", "kasko"]],
+    ["rechnung", [" öde", "ödeme", " kira", "havale"]]
+  ],
+  fillers: [
+    "hey livo", "merhaba livo", "livo", "bana hatırlat", "hatırlat bana", "hatırlat", "lütfen", "benim", "bitiyor", "sona eriyor",
+    "doluyor", "geçerli", "kadar", "tarihinde", "günü", "saat", "ve", "için", "gerekiyor", "lazım", "en geç"
+  ],
+  whatWord: { versicherung: /([a-zçğıöşü]+ sigortas[ıi]|kasko)/i, abo: /(netflix|spotify|spor salonu|[a-zçğıöşü]+ üyeliği)/i },
+  whatSkip: []
+};
+
+/* ---------- Polnisch ---------- */
+LEX.pl = {
+  fold: true, inNoNum: true,
+  months: {
+    "styczeń": 1, stycznia: 1, styczniu: 1, luty: 2, lutego: 2, lutym: 2, marzec: 3, marca: 3, marcu: 3,
+    "kwiecień": 4, kwietnia: 4, kwietniu: 4, maj: 5, maja: 5, maju: 5, czerwiec: 6, czerwca: 6, czerwcu: 6,
+    lipiec: 7, lipca: 7, lipcu: 7, "sierpień": 8, sierpnia: 8, sierpniu: 8, "wrzesień": 9, "września": 9, "wrześniu": 9,
+    "październik": 10, "października": 10, "październiku": 10, listopad: 11, listopada: 11, listopadzie: 11,
+    "grudzień": 12, grudnia: 12, grudniu: 12
+  },
+  weekdays: {
+    niedziela: 0, "niedzielę": 0, niedzieli: 0, "poniedziałek": 1, "poniedziałku": 1, wtorek: 2, wtorku: 2,
+    "środa": 3, "środę": 3, "środy": 3, czwartek: 4, czwartku: 4, "piątek": 5, "piątku": 5, sobota: 6, "sobotę": 6, soboty: 6
+  },
+  // Stunden sagt man mit Ordnungszahlen: "o trzeciej", "wpół do czwartej", "za kwadrans czwarta"
+  nums: {
+    pierwszej: 1, drugiej: 2, trzeciej: 3, czwartej: 4, "piątej": 5, "szóstej": 6, "siódmej": 7, "ósmej": 8, "dziewiątej": 9,
+    "dziesiątej": 10, jedenastej: 11, dwunastej: 12, pierwsza: 1, druga: 2, trzecia: 3, czwarta: 4, "piąta": 5, "szósta": 6,
+    "siódma": 7, "ósma": 8, "dziewiąta": 9, "dziesiąta": 10, jedenasta: 11, dwunasta: 12
+  },
+  counts: {
+    jeden: 1, jedna: 1, jedno: 1, dwa: 2, dwie: 2, trzy: 3, cztery: 4, "pięć": 5, "sześć": 6, siedem: 7, osiem: 8,
+    "dziewięć": 9, "dziesięć": 10, "jedenaście": 11, "dwanaście": 12, "piętnaście": 15, "dwadzieścia": 20, "trzydzieści": 30
+  },
+  ordinals: polishOrdinals(),
+  pre: "(?:do |od |na |w dniu |dnia |dzień |przed |najpóźniej |po )*",
+  parts: {
+    koniec: "end", "pod koniec": "end", "na koniec": "end", "końca": "end", "do końca": "end", "z końcem": "end",
+    "początek": "start", "na początku": "start", "początku": "start", "z początkiem": "start", "od początku": "start",
+    "połowa": "mid", "w połowie": "mid", "połowy": "mid", "do połowy": "mid", "połowie": "mid"
+  },
+  partPre: "",
+  monthPre: "(?:w |we |do |od |na |przed |po )?", numMonthPre: "(?:w |do |od )?",
+  today: ["dziś", "dzisiaj"], tomorrow: ["jutro"], dayAfter: ["pojutrze"],
+  inWord: "(?:za|w ciągu)",
+  units: { day: ["dni", "dzień", "dnia"], week: ["tygodnie", "tygodni", "tydzień", "tygodnia"], month: ["miesiące", "miesięcy", "miesiąc", "miesiąca"], year: ["lata", "lat", "rok", "roku"] },
+  rel: [[["w przyszłym tygodniu", "przyszły tydzień", "w następnym tygodniu", "następny tydzień"], { days: 7 }],
+    [["w przyszłym miesiącu", "przyszły miesiąc", "w następnym miesiącu"], { months: 1 }],
+    [["w przyszłym roku", "przyszły rok", "w następnym roku"], { months: 12 }]],
+  wdPre: "(?:w |we |do |od |na |przyszły |przyszłą |następny |następną |najbliższy |najbliższą |ten |tę |tą )*", wdNext: /przyszł|następn/,
+  // "o 10", "o 10:30", "o godzinie 15", "o trzeciej", "wpół do czwartej", "kwadrans po trzeciej", "w południe"
+  times: function (H, hourOf) {
+    function exact(m) { return { h: +m[1], m: m[2] ? +m[2] : 0, padded: /^0\d/.test(m[1]) }; }
+    return [
+      [" (?:o )?wpół do " + H, function (m) { return { h: hourOf(m[1]) - 1, m: 30 }; }],
+      [" (?:o )?kwadrans po " + H, function (m) { return { h: hourOf(m[1]), m: 15 }; }],
+      [" (?:za )?kwadrans " + H, function (m) { return { h: hourOf(m[1]) - 1, m: 45 }; }],
+      [" (?:o |około |od |przed )?(?:godz\\.? |godzinie |godziny )?(\\d{1,2}):(\\d{2})", exact],
+      [" (?:o|około|od|przed)(?: godz\\.?| godzinie| godziny)? (\\d{1,2})(?:\\.(\\d{2}))?", exact],
+      [" (?:na|do) (?:godz\\.?|godzinę|godziny) (\\d{1,2})(?:[:.](\\d{2}))?", exact],
+      [" (?:o|około|od|przed) " + H, function (m) { return { h: hourOf(m[1]), m: 0 }; }],
+      [" (?:w |o )?południe", function () { return { h: 12, m: 0, fixed: true }; }],
+      [" o północy", function () { return { h: 0, m: 0, fixed: true }; }]
+    ];
+  },
+  pm: / (po południu|popołudniu|wieczorem|wieczór)(?= )/,
+  am: / (rano|z rana|rankiem|przed południem|w nocy|nad ranem)(?= )/,
+  dueWords: /dawk|przypominaj|wygasa|kończy|następn|kolejn/,
+  keywords: [
+    ["reisepass", ["paszport"]],
+    ["fuehrerschein", ["prawo jazdy", "prawa jazdy", "prawem jazdy"]],
+    // " wiza " mit Leerzeichen: "wizyta" (Arztbesuch) enthält "wiz…"
+    ["aufenthaltstitel", ["karta pobytu", "karty pobytu", "kartę pobytu", "pobyt", " wiza ", " wizy ", " wizę "]],
+    ["personalausweis", ["dowód osobisty", "dowodu osobistego", "dowód", "dowodu"]],
+    ["rechnung", ["rachunek", "rachunku", "faktur"]],
+    ["zahnarzt", ["dentyst", "stomatolog", "zęb"]],
+    ["checkup", ["badania kontrolne", "badanie kontrolne", "badania okresowe", "check-up", "checkup", "morfologi"]],
+    ["tetanus", ["tężec", "tężca", "szczepien", "szczepionk"]],
+    ["tuev", ["przegląd techniczny", "przeglądu technicznego", "badanie techniczne", "przegląd auta", "przegląd samochodu", "przegląd"]],
+    ["inspektion", ["serwis", "wymiana oleju", "warsztat", "mechanik"]],
+    ["handy", ["umowa na telefon", "telefon", "komórk", "abonament", "internet", "światłowód", " play ", "orange", " plus ", "t-mobile"]],
+    ["strom", ["prąd", "energi", " gaz ", "gazu", "elektryczn"]],
+    ["abo", ["siłowni", "siłownia", "karnet", "subskrypcj", "netflix", "spotify", "członkostw"]],
+    ["versicherung", ["ubezpieczeni", "polis", " oc ", " ac "]],
+    ["arzttermin", ["lekarz", "lekark", "doktor", "przychodni", "szpital", "wizyt", "fizjoterap", "pediatr", "ginekolog", "okulist", "dermatolog"]],
+    ["rechnung", ["zapłacić", "zapłać", "opłacić", "opłata", "przelew", "czynsz"]]
+  ],
+  fillers: [
+    "hej livo", "hey livo", "cześć livo", "ok livo", "livo", "przypomnij mi o tym że", "przypomnij mi że", "przypomnij mi o",
+    "przypomnij mi", "przypomnij", "po południu", "kończy się", "ważny do", "ważna do", "proszę", "muszę", "trzeba",
+    "mój", "moja", "moje", "mojego", "mojej", "moim", "mi", "że", "o", "do", "na", "w", "we", "i", "się", "kończy",
+    "wygasa", "ważny", "ważna", "jest", "dnia", "godzinie", "godz.", "godz", "rano", "wieczorem", "r."
+  ],
+  whatWord: { versicherung: /ubezpieczenie(?: [a-ząćęłńóśźż]+)?/i, abo: /(siłowni[a-ząćęłńóśźż]*|netflix|spotify|karnet[a-ząćęłńóśźż]*)/i },
+  whatSkip: ["ubezpieczenie"]
+};
+
+Object.keys(LEX).forEach(function (k) { if (LEX[k].fold) foldLex(LEX[k]); });
+
 function lexFor() { return LEX[LANG] || LEX.en; }
 
-function norm(s) { return String(s).replace(/[,;!?„“”"«»()]/g, " ").replace(/\s+/g, " ").trim(); }
+function norm(s) { return String(s).replace(/[’‘]/g, "'").replace(/[,;!?„“”"«»()]/g, " ").replace(/\s+/g, " ").trim(); }
 // Schreibweisen vereinheitlichen, bevor gesucht wird (Länge darf sich hier ändern)
 function prepare(text, L) {
   var s = norm(text);
-  if (L.ordSuffix) s = s.replace(/(\d+)(st|nd|rd|th)\b/gi, "$1");
+  if (L.ordSuffix) s = s.replace(L.ordSuffix, "$1");
+  s = s.replace(/(\d)[º°ª]/g, "$1");                    // "1º de noviembre"
+  if (L.prep) s = L.prep(s);
   return s.replace(/\b([ap])\.m\.?/gi, "$1m").replace(/\bmid-/gi, "mid ");
 }
+// Französisch/Italienisch: "l'8", "aujourd'hui", "all'una" -> "l' 8" usw., damit Monate,
+// Zahlen und Uhrzeiten als eigene Wörter gefunden werden (cleanTitle fügt es wieder zusammen)
+function splitElision(s) { return s.replace(/'(?=\S)/g, "' "); }
 
 function validDay(y, m, d) {
   var dt = new Date(y, m - 1, d);
@@ -207,7 +882,7 @@ function monthPart(m, y, part) {
 function extract(text, L) {
   L = L || lexFor();
   var orig = " " + prepare(text, L) + " ";
-  var low = orig.toLowerCase();
+  var low = lowerOf(orig, L);
   var t0 = today(), date = null, time = null, m;
 
   // Treffer aus beiden Fassungen herausschneiden (beide haben dieselbe Länge)
@@ -218,12 +893,17 @@ function extract(text, L) {
     orig = orig.slice(0, i) + " " + orig.slice(i + match.length);
   }
 
-  // Uhrzeit zuerst, damit "um 10 Uhr" nicht als Datum gelesen wird
+  var MONTH = altKeys(L.months), ORD = L.ordinals ? altKeys(L.ordinals) : "", WD = altKeys(L.weekdays);
+  var SFX = L.suffix || "", JOIN = L.dmJoin || "";
+
+  // Uhrzeit zuerst, damit "um 10 Uhr" nicht als Datum gelesen wird - aber keine Zahl direkt
+  // vor einem Monat ("στις 3 Νοεμβρίου" ist der 3. November, nicht 15 Uhr)
   var H = "(\\d{1,2}|" + altKeys(L.nums) + ")";
+  var NOT_DATE = "(?! " + JOIN + "(?:" + MONTH + ")" + SFX + "[ .])";
   function hourOf(s) { return /\d/.test(s) ? +s : L.nums[s]; }
   var patterns = L.times(H, hourOf), tm = null;
   for (var i = 0; i < patterns.length && !tm; i++) {
-    m = low.match(new RegExp(patterns[i][0] + "(?= )"));
+    m = low.match(new RegExp(patterns[i][0] + NOT_DATE + "(?= )"));
     if (!m) continue;
     var r = patterns[i][1](m);
     if (r && r.h >= 0 && r.h < 24 && r.m < 60) { tm = r; cut(m[0]); }
@@ -239,6 +919,11 @@ function extract(text, L) {
     }
     time = pad(hour) + ":" + pad(tm.m);
   }
+  // Tageszeiten, die sonst wie ein Datum aussehen ("por la mañana" ist nicht "mañana" = morgen)
+  (L.preCut || []).forEach(function (w) {
+    var re = new RegExp(" " + escRe(w) + "(?= )"), mm;
+    while ((mm = low.match(re))) cut(mm[0]);
+  });
 
   function first(re, fn) {
     if (date) return;
@@ -247,8 +932,7 @@ function extract(text, L) {
     var d = fn(mm);
     if (d && isDate(d)) { date = d; cut(mm[0]); }
   }
-  var MONTH = altKeys(L.months), ORD = L.ordinals ? altKeys(L.ordinals) : "", WD = altKeys(L.weekdays);
-  var PRE = L.pre, JOIN = L.dmJoin || "", Y = "(?: (\\d{4}))?(?= )";
+  var PRE = L.pre || "", Y = "(?: " + (L.yJoin || "") + "(\\d{4}))?(?= )";
 
   // 15.03.2027 · 15.3. · 15/3 (in den USA Monat/Tag)
   first(new RegExp(" " + PRE + "(\\d{1,2})(\\. ?|/)(\\d{1,2})(?:[./](\\d{2,4})?)?(?= )"), function (x) {
@@ -258,46 +942,60 @@ function extract(text, L) {
     if (slash && L.mdy && L.mdy()) return md || dm;
     return dm || (slash ? md : null);
   });
-  // 15. März 2027 · 15 March · 15 of March
-  first(new RegExp(" " + PRE + "(\\d{1,2})\\.? " + JOIN + "(" + MONTH + ")\\.?" + Y), function (x) { return dayMonth(+x[1], L.months[x[2]], x[3]); });
-  // ersten April · third of March
-  if (ORD) first(new RegExp(" " + PRE + "(" + ORD + ") " + JOIN + "(" + MONTH + ")\\.?" + Y), function (x) { return dayMonth(L.ordinals[x[1]], L.months[x[2]], x[3]); });
+  // 15-08-2029 (Niederlande) - nur mit Jahr, "10-12 Uhr" bleibt eine Zeitspanne
+  first(new RegExp(" " + PRE + "(\\d{1,2})-(\\d{1,2})-(\\d{4})(?= )"), function (x) { return dayMonth(+x[1], +x[2], x[3]); });
+  // 15. März 2027 · 15 March · 15 of March · 3 de noviembre de 2027
+  first(new RegExp(" " + PRE + "(\\d{1,2})\\.? " + JOIN + "(" + MONTH + ")" + SFX + "\\.?" + Y), function (x) { return dayMonth(+x[1], L.months[x[2]], x[3]); });
+  // ersten April · third of March · trzeciego listopada
+  if (ORD) first(new RegExp(" " + PRE + "(" + ORD + ") " + JOIN + "(" + MONTH + ")" + SFX + "\\.?" + Y), function (x) { return dayMonth(L.ordinals[x[1]], L.months[x[2]], x[3]); });
   // March 15 · March fifteenth
   if (L.monthDay) {
     first(new RegExp(" " + PRE + "(" + MONTH + ") (\\d{1,2})" + Y), function (x) { return dayMonth(+x[2], L.months[x[1]], x[3]); });
     if (ORD) first(new RegExp(" " + PRE + "(" + MONTH + ") (?:the )?(" + ORD + ")" + Y), function (x) { return dayMonth(L.ordinals[x[2]], L.months[x[1]], x[3]); });
   }
-  // Ende März · end of March
-  first(new RegExp(" " + L.partPre + "(" + altKeys(L.parts) + ") (" + MONTH + ")\\.?" + Y), function (x) { return monthPart(L.months[x[2]], x[3], L.parts[x[1]]); });
+  // Ende März · end of March · finales de noviembre
+  if (L.parts) first(new RegExp(" " + (L.partPre || "") + "(" + altKeys(L.parts) + ") (" + MONTH + ")" + SFX + "\\.?" + Y), function (x) { return monthPart(L.months[x[2]], x[3], L.parts[x[1]]); });
+  // Kasım sonunda (der Teil steht hinter dem Monat)
+  if (L.partsAfter) first(new RegExp(" (" + MONTH + ")" + SFX + "(?: (\\d{4}))?(?: ay[a-z]*)? (" + altKeys(L.partsAfter) + ")(?= )"), function (x) { return monthPart(L.months[x[1]], x[2], L.partsAfter[x[3]]); });
   // im März 2027 · in March → letzter Tag des Monats
-  first(new RegExp(" " + L.monthPre + "(" + MONTH + ")\\.?" + Y), function (x) { return monthPart(L.months[x[1]], x[2], "end"); });
+  first(new RegExp(" " + (L.monthPre || "") + "(" + MONTH + ")" + SFX + "\\.?" + Y), function (x) { return monthPart(L.months[x[1]], x[2], "end"); });
   // 04/2027 · 4.2027 → letzter Tag des Monats
-  first(new RegExp(" " + L.numMonthPre + "(\\d{1,2})[\\/.](\\d{4})(?= )"), function (x) { return monthPart(+x[1], x[2], "end"); });
-  // übermorgen · morgen · heute
-  [[L.dayAfter, 2], [L.tomorrow, 1], [L.today, 0]].forEach(function (w) {
-    first(new RegExp(" (?:" + alt(w[0]) + ")(?= )"), function () { return addDays(t0, w[1]); });
+  first(new RegExp(" " + (L.numMonthPre || "") + "(\\d{1,2})[\\/.](\\d{4})(?= )"), function (x) { return monthPart(+x[1], x[2], "end"); });
+  // übermorgen · morgen · heute (Spanisch: "esta mañana" = heute vor "mañana" = morgen)
+  var dayWords = L.todayFirst ? [[L.dayAfter, 2], [L.today, 0], [L.tomorrow, 1]] : [[L.dayAfter, 2], [L.tomorrow, 1], [L.today, 0]];
+  dayWords.forEach(function (w) {
+    if (w[0] && w[0].length) first(new RegExp(" (?:" + alt(w[0]) + ")" + SFX + "(?= )"), function () { return addDays(t0, w[1]); });
   });
-  // in 2 Wochen · in drei Monaten · in a week
+  // in 2 Wochen · in drei Monaten · in a week · za tydzień · 3 gün sonra
   var counts = L.counts || L.nums, U = L.units;
-  first(new RegExp(" " + L.inWord + " (\\d{1,3}|" + altKeys(counts) + ") (" + alt([].concat(U.day, U.week, U.month, U.year)) + ")(?= )"), function (x) {
-    var n = /\d/.test(x[1]) ? +x[1] : counts[x[1]], u = x[2];
+  var NUM = "(\\d{1,3}|" + altKeys(counts) + ")", UNIT = "(" + alt([].concat(U.day, U.week, U.month, U.year)) + ")";
+  var inRe = L.inAfter ? " " + NUM + " " + UNIT + SFX + " (?:" + L.inAfter + ")(?= )"
+    : " " + L.inWord + " " + (L.inNoNum ? "(?:" + NUM + " )?" : NUM + " ") + UNIT + "(?= )";
+  first(new RegExp(inRe), function (x) {
+    var n = x[1] == null ? 1 : /\d/.test(x[1]) ? +x[1] : counts[x[1]], u = x[2];
     if (U.day.indexOf(u) >= 0) return addDays(t0, n);
     if (U.week.indexOf(u) >= 0) return addDays(t0, 7 * n);
     if (U.month.indexOf(u) >= 0) return addMonths(t0, n);
     return addMonths(t0, 12 * n);
   });
   // nächste Woche · nächsten Monat · next year
-  L.rel.forEach(function (rel) {
-    first(new RegExp(" (?:" + alt(rel[0]) + ")(?= )"), function () { return rel[1].days ? addDays(t0, rel[1].days) : addMonths(t0, rel[1].months); });
-  });
+  function relative() {
+    L.rel.forEach(function (rel) {
+      first(new RegExp(" (?:" + alt(rel[0]) + ")(?= )"), function () { return rel[1].days ? addDays(t0, rel[1].days) : addMonths(t0, rel[1].months); });
+    });
+  }
   // (am / bis / nächsten) Dienstag
-  first(new RegExp(" (" + L.wdPre + ")(" + WD + ")(?= )"), function (x) {
-    var wd = L.weekdays[x[2]], diff = (wd - t0.getDay() + 7) % 7 || 7;
-    var iso = function (d) { return d === 0 ? 7 : d; };
-    // "nächsten Dienstag" am Montag = Dienstag der nächsten Woche
-    if (L.wdNext.test(x[1]) && iso(wd) > iso(t0.getDay())) diff += 7;
-    return addDays(t0, diff);
-  });
+  function weekday() {
+    first(new RegExp(" (" + (L.wdPre || "") + ")(" + WD + ")" + SFX + "(?= )"), function (x) {
+      var wd = L.weekdays[x[2]], diff = (wd - t0.getDay() + 7) % 7 || 7;
+      var iso = function (d) { return d === 0 ? 7 : d; };
+      // "nächsten Dienstag" am Montag = Dienstag der nächsten Woche
+      if (L.wdNext && L.wdNext.test(x[1]) && iso(wd) > iso(t0.getDay())) diff += 7;
+      return addDays(t0, diff);
+    });
+  }
+  // "haftaya salı" ist der Dienstag der nächsten Woche, nicht "in einer Woche"
+  if (L.wdBeforeRel) { weekday(); relative(); } else { relative(); weekday(); }
 
   return { date: date, time: time, rest: cleanTitle(orig, L) };
 }
@@ -309,12 +1007,13 @@ function cleanTitle(s, L) {
     s = s.replace(new RegExp(" " + escRe(f) + "(?= )", "gi"), " ");
   });
   s = s.replace(/\s+/g, " ").replace(/^[\s.:-]+|[\s.:-]+$/g, "");
+  if (L.elide) s = s.replace(/' /g, "'");
   return capitalize(s);
 }
 
 function detectTemplate(text, L) {
   L = L || lexFor();
-  var low = " " + prepare(text, L).toLowerCase() + " ";
+  var low = " " + lowerOf(prepare(text, L), L) + " ";
   for (var i = 0; i < L.keywords.length; i++) {
     for (var j = 0; j < L.keywords[i][1].length; j++) {
       if (low.indexOf(L.keywords[i][1][j]) >= 0) return L.keywords[i][0];
@@ -346,7 +1045,7 @@ function draftFrom(text) {
   if (!needsDate) d.due = toISO(x.date || r.due);              // Kfz, Reifen, Steuer: Datum optional
   else if (!x.date) d.due = "";                                  // Datum fehlt → Nutzer trägt es ein
   // Zukunft oder "auffrischen / fällig / nächste" = der Termin selbst, sonst "letztes Mal" bzw. Vertragsbeginn
-  else if (tp.dateMeans && (x.date >= today() || L.dueWords.test(text.toLowerCase()))) d.due = toISO(x.date);
+  else if (tp.dateMeans && (x.date >= today() || L.dueWords.test(lowerOf(text, L)))) d.due = toISO(x.date);
   else d.due = toISO(r.due);
   return d;
 }

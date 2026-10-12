@@ -53,11 +53,75 @@ const TEXT: Record<string, Record<string, string>> = {
     many: '{n} deadlines need your attention', more: '… and {n} more',
     soon: 'Starts in {n} minutes · {time}', soon1: 'Starts in 1 minute · {time}', now: 'Now · {time}',
     testTitle: '✓ Reminders are on', testBody: 'Livo will get in touch when a deadline is coming up.'
+  },
+  it: {
+    today: 'scade oggi', tomorrow: 'scade domani', yesterday: 'scaduto da ieri', overdue: 'scaduto da {n} giorni',
+    days: 'tra {n} giorni', months: 'tra {n} mesi', years: 'tra {n} anni', dueOn: 'scade il {date}', clock: '',
+    many: '{n} scadenze richiedono la tua attenzione', more: '… e altre {n}',
+    soon: 'Inizia tra {n} minuti · {time}', soon1: 'Inizia tra 1 minuto · {time}', now: 'Adesso · {time}',
+    testTitle: '✓ Promemoria attivi', testBody: 'Livo ti avvisa quando una scadenza si avvicina.'
+  },
+  el: {
+    today: 'λήγει σήμερα', tomorrow: 'λήγει αύριο', yesterday: 'έληξε χθες', overdue: 'έληξε πριν από {n} μέρες',
+    days: 'σε {n} μέρες', months: 'σε {n} μήνες', years: 'σε {n} χρόνια', dueOn: 'λήγει {date}', clock: '',
+    many: '{n} προθεσμίες θέλουν την προσοχή σου', more: '… και {n} ακόμα',
+    soon: 'Ξεκινά σε {n} λεπτά · {time}', soon1: 'Ξεκινά σε 1 λεπτό · {time}', now: 'Τώρα · {time}',
+    testTitle: '✓ Οι υπενθυμίσεις είναι ενεργές', testBody: 'Το Livo θα σε ειδοποιεί όταν πλησιάζει μια προθεσμία.'
+  },
+  es: {
+    today: 'vence hoy', tomorrow: 'vence mañana', yesterday: 'venció ayer', overdue: 'vencido hace {n} días',
+    days: 'en {n} días', months: 'en {n} meses', years: 'en {n} años', dueOn: 'vence el {date}', clock: '',
+    many: '{n} plazos necesitan tu atención', more: '… y {n} más',
+    soon: 'Empieza en {n} minutos · {time}', soon1: 'Empieza en 1 minuto · {time}', now: 'Ahora · {time}',
+    testTitle: '✓ Avisos activados', testBody: 'Livo te avisará cuando se acerque un plazo.'
+  },
+  fr: {
+    today: "aujourd'hui", tomorrow: 'demain', yesterday: 'en retard depuis hier', overdue: 'en retard de {n} jours',
+    days: 'dans {n} jours', months: 'dans {n} mois', years: 'dans {n} ans', dueOn: 'échéance le {date}', clock: '',
+    many: '{n} échéances demandent votre attention', more: '… et {n} autres',
+    soon: 'Commence dans {n} minutes · {time}', soon1: 'Commence dans 1 minute · {time}', now: 'Maintenant · {time}',
+    testTitle: '✓ Rappels activés', testBody: 'Livo vous préviendra quand une échéance approche.'
+  },
+  nl: {
+    today: 'vandaag', tomorrow: 'morgen', yesterday: 'sinds gisteren verlopen', overdue: '{n} dagen te laat',
+    days: 'over {n} dagen', months: 'over {n} maanden', years: 'over {n} jaar', dueOn: 'uiterlijk {date}', clock: ' uur',
+    many: '{n} deadlines vragen je aandacht', more: '… en nog {n}',
+    soon: 'Begint over {n} minuten · {time}', soon1: 'Begint over 1 minuut · {time}', now: 'Nu · {time}',
+    testTitle: '✓ Herinneringen staan aan', testBody: 'Livo laat van zich horen als een deadline dichterbij komt.'
+  },
+  pt: {
+    today: 'vence hoje', tomorrow: 'vence amanhã', yesterday: 'venceu ontem', overdue: 'atrasado há {n} dias',
+    days: 'daqui a {n} dias', months: 'daqui a {n} meses', years: 'daqui a {n} anos', dueOn: 'vence em {date}', clock: '',
+    many: '{n} prazos precisam da sua atenção', more: '… e mais {n}',
+    soon: 'Começa daqui a {n} minutos · {time}', soon1: 'Começa daqui a 1 minuto · {time}', now: 'Agora · {time}',
+    testTitle: '✓ Lembretes ativos', testBody: 'O Livo avisa quando um prazo se aproximar.'
+  },
+  tr: {
+    today: 'bugün', tomorrow: 'yarın', yesterday: 'dün geçti', overdue: '{n} gün geçti',
+    days: '{n} gün sonra', months: '{n} ay sonra', years: '{n} yıl sonra', dueOn: 'son tarih {date}', clock: '',
+    many: '{n} tarih ilgini bekliyor', more: '… ve {n} tane daha',
+    soon: '{n} dakika sonra başlıyor · {time}', soon1: '1 dakika sonra başlıyor · {time}', now: 'Şimdi · {time}',
+    testTitle: '✓ Hatırlatmalar açık', testBody: 'Bir tarih yaklaştığında Livo haber verir.'
+  },
+  pl: {
+    today: 'dziś', tomorrow: 'jutro', yesterday: 'minął wczoraj', overdue: '{n} dni po terminie',
+    days: 'za {n} dni', months: 'za {n} miesięcy', 'months.few': 'za {n} miesiące', years: 'za {n} lat', 'years.few': 'za {n} lata',
+    dueOn: 'termin {date}', clock: '',
+    many: '{n} terminów wymaga twojej uwagi', 'many.few': '{n} terminy wymagają twojej uwagi', more: '… i {n} więcej',
+    soon: 'Zaczyna się za {n} minut · {time}', 'soon.few': 'Zaczyna się za {n} minuty · {time}', soon1: 'Zaczyna się za 1 minutę · {time}', now: 'Teraz · {time}',
+    testTitle: '✓ Przypomnienia są włączone', testBody: 'Livo da znać, gdy zbliży się termin.'
   }
 };
+// Polnisch: 2–4, 22–24 … haben eine eigene Mehrzahl ("za 3 miesiące", aber "za 5 miesięcy")
+function fewForm(n: number): boolean {
+  const a = Math.abs(n) % 10, b = Math.abs(n) % 100;
+  return a >= 2 && a <= 4 && (b < 12 || b > 14);
+}
 function tx(lang: string | undefined, key: string, vars: Record<string, string | number> = {}): string {
-  const s = (TEXT[lang ?? ''] ?? TEXT.en)[key] ?? TEXT.en[key] ?? key;
-  return s.replace(/\{(\w+)\}/g, (m, k) => (vars[k] != null ? String(vars[k]) : m));
+  const table = TEXT[lang ?? ''] ?? TEXT.en;
+  const k = typeof vars.n === 'number' && table[`${key}.few`] && fewForm(vars.n) ? `${key}.few` : key;
+  const s = table[k] ?? TEXT.en[key] ?? key;
+  return s.replace(/\{(\w+)\}/g, (m, name) => (vars[name] != null ? String(vars[name]) : m));
 }
 type Deadline = { id: string; user_id: string; title: string; due: string; due_time: string | null; lead_days: number; notified_for: string | null };
 type SoonRow = { id: string; user_id: string; title: string; due: string; due_time: string; remind_min: number; tz: string | null; time_notified_for: string | null };
@@ -79,11 +143,18 @@ function addDays(iso: string, n: number): string {
 function daysBetween(from: string, to: string): number {
   return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86400000);
 }
-// Deutsch "31.03.2027", sonst "31 Mar 2027" - eindeutig, egal ob das Handy Tag oder Monat zuerst schreibt
+// Deutsch "31.03.2027", Englisch "31 Mar 2027" (eindeutig, egal ob das Handy Tag oder Monat
+// zuerst schreibt), die anderen Sprachen in ihrer üblichen Schreibweise ("31/03/2027", "31-03-2027" …)
+const DATE_LOCALES: Record<string, string> = {
+  it: 'it-IT', el: 'el-GR', es: 'es-ES', fr: 'fr-FR', nl: 'nl-NL', pt: 'pt-PT', tr: 'tr-TR', pl: 'pl-PL'
+};
 function fmt(iso: string, lang?: string): string {
   const [y, m, d] = iso.split('-');
   if (lang === 'de') return `${d}.${m}.${y}`;
-  return new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' }).format(new Date(`${iso}T00:00:00Z`));
+  const date = new Date(`${iso}T00:00:00Z`);
+  const locale = DATE_LOCALES[lang ?? ''];
+  if (locale) return new Intl.DateTimeFormat(locale, { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' }).format(date);
+  return new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' }).format(date);
 }
 // Gleiche Texte wie in der App (whenText in app.js)
 function whenText(days: number, lang?: string): string {
