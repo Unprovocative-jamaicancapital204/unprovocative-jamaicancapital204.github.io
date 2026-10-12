@@ -3,6 +3,9 @@
 //   Erinnert jeden Nutzer in der Testphase oder mit Livo Plus an alle Fristen, deren
 //   Erinnerungszeit erreicht ist (Fälligkeit minus lead_days) - einmal pro Fälligkeit
 //   (notified_for). Mehrere Fristen am selben Tag kommen als eine Nachricht.
+// - POST {"action":"soon"} mit Header x-cron-secret: jede Minute per pg_cron (0005_soon_reminders.sql).
+//   Erinnert kurz vor Terminen mit Uhrzeit (remind_min Minuten vorher), einmal pro Termin
+//   (time_notified_for). Die Uhrzeit gilt in der Zeitzone, in der die Frist gespeichert wurde.
 // - POST {"action":"test"} mit dem Login des Nutzers (Authorization: Bearer <access token>):
 //   sofort eine Probe-Nachricht an seine Geräte, nach "Erinnerungen einschalten".
 //
@@ -34,7 +37,8 @@ const CORS_HEADERS = {
 
 type Sub = { endpoint: string; p256dh: string; auth_key: string; user_id: string };
 type Deadline = { id: string; user_id: string; title: string; due: string; due_time: string | null; lead_days: number; notified_for: string | null };
-type Payload = { title: string; body: string; tag: string; url: string };
+type SoonRow = { id: string; user_id: string; title: string; due: string; due_time: string; remind_min: number; tz: string | null; time_notified_for: string | null };
+type Payload = { title: string; body: string; tag: string; url: string; urgency?: string };
 
 function json(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), { status, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' } });
@@ -141,8 +145,8 @@ async function sendPush(target: Sub, payload: Payload): Promise<number> {
         Authorization: await vapidAuthorization(target.endpoint),
         'Content-Encoding': 'aes128gcm',
         'Content-Type': 'application/octet-stream',
-        TTL: String(TTL_SECONDS),
-        Urgency: 'normal'
+        TTL: String(payload.urgency === 'high' ? 3600 : TTL_SECONDS),
+        Urgency: payload.urgency === 'high' ? 'high' : 'normal'
       },
       body
     });
@@ -207,14 +211,78 @@ function messageFor(list: Deadline[], today: string): Payload {
   return { title: `${list.length} Fristen brauchen deine Aufmerksamkeit`, body: lines.join('\n'), tag: 'livo-daily', url: APP_URL };
 }
 
-async function runReminders() {
-  const today = berlinToday();
-  // Nur wer in der Testphase ist oder Livo Plus hat (gleiche Regel wie 0002_trial.sql)
+// Nur wer in der Testphase ist oder Livo Plus hat (gleiche Regel wie 0002_trial.sql)
+async function eligibleUsers(today: string): Promise<Set<string>> {
   const [plus, trial] = await Promise.all([
     fetchAll<{ user_id: string }>((a, b) => supabase.from('plans').select('user_id').gte('plus_until', today).order('user_id').range(a, b)),
     fetchAll<{ user_id: string }>((a, b) => supabase.from('usage').select('user_id').gte('trial_started', addDays(today, -TRIAL_DAYS)).order('user_id').range(a, b))
   ]);
-  const eligible = new Set([...plus, ...trial].map((row) => row.user_id));
+  return new Set([...plus, ...trial].map((row) => row.user_id));
+}
+
+async function subscriptionsOf(userIds: string[]): Promise<Sub[]> {
+  const subs: Sub[] = [];
+  for (let i = 0; i < userIds.length; i += 100) {
+    const { data } = await supabase.from('push_subscriptions').select('endpoint, p256dh, auth_key, user_id').in('user_id', userIds.slice(i, i + 100));
+    subs.push(...((data ?? []) as Sub[]));
+  }
+  return subs;
+}
+
+// Datum + Uhrzeit in einer Zeitzone (z. B. "2026-11-03", "10:00", "Europe/Berlin") als UTC-Millisekunden
+function zonedToUtc(date: string, time: string, tz: string): number {
+  const [y, m, d] = date.split('-').map(Number);
+  const [h, mi] = time.split(':').map(Number);
+  const guess = Date.UTC(y, m - 1, d, h, mi);
+  let zone = tz;
+  try { new Intl.DateTimeFormat('en-US', { timeZone: zone }); } catch { zone = 'Europe/Berlin'; }
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: zone, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'
+  }).formatToParts(new Date(guess));
+  const get = (type: string) => Number(parts.find((part) => part.type === type)?.value);
+  const shownThere = Date.UTC(get('year'), get('month') - 1, get('day'), get('hour'), get('minute'));
+  return guess - (shownThere - guess);
+}
+
+// Kurz vor Terminen mit Uhrzeit. Fenster: ab "remind_min vorher" bis 15 Minuten nach
+// Beginn, falls ein Lauf ausgefallen ist - danach hilft die Nachricht nicht mehr.
+async function runSoon() {
+  const now = Date.now();
+  const today = berlinToday();
+  const { data, error } = await supabase.from('deadlines')
+    .select('id, user_id, title, due, due_time, remind_min, tz, time_notified_for')
+    .not('due_time', 'is', null).not('remind_min', 'is', null)
+    .gte('due', addDays(today, -1)).lte('due', addDays(today, 2));
+  if (error) throw error;
+  const candidates = ((data ?? []) as SoonRow[]).filter((row) => {
+    const key = `${row.due} ${row.due_time.slice(0, 5)}`;
+    if (row.time_notified_for === key) return false;
+    const at = zonedToUtc(row.due, row.due_time, row.tz || 'Europe/Berlin');
+    return now >= at - row.remind_min * 60000 && now <= at + 15 * 60000;
+  });
+  if (!candidates.length) return { soon: 0 };
+  const eligible = await eligibleUsers(today);
+  const rows = candidates.filter((row) => eligible.has(row.user_id));
+  const subs = await subscriptionsOf([...new Set(rows.map((row) => row.user_id))]);
+  let sent = 0;
+  for (const row of rows) {
+    const targets = subs.filter((sub) => sub.user_id === row.user_id);
+    if (!targets.length) continue;
+    const at = zonedToUtc(row.due, row.due_time, row.tz || 'Europe/Berlin');
+    const minutes = Math.round((at - now) / 60000);
+    const time = row.due_time.slice(0, 5);
+    const body = minutes > 0 ? `Beginnt in ${minutes} ${minutes === 1 ? 'Minute' : 'Minuten'} · ${time} Uhr` : `Jetzt · ${time} Uhr`;
+    const ok = await deliver(targets, { title: row.title, body, tag: `livo-soon-${row.id}`, url: APP_URL, urgency: 'high' });
+    if (!ok) continue;
+    sent++;
+    await supabase.from('deadlines').update({ time_notified_for: `${row.due} ${time}` }).eq('id', row.id);
+  }
+  return { soon: sent };
+}
+
+async function runReminders() {
+  const today = berlinToday();
+  const eligible = await eligibleUsers(today);
   if (!eligible.size) return { today, users: 0, devices: 0, deadlines: 0 };
 
   const rows = await fetchAll<Deadline>((a, b) => supabase.from('deadlines')
@@ -226,12 +294,7 @@ async function runReminders() {
     byUser.set(row.user_id, [...(byUser.get(row.user_id) ?? []), row]);
   }
 
-  const userIds = [...byUser.keys()];
-  const subs: Sub[] = [];
-  for (let i = 0; i < userIds.length; i += 100) {
-    const { data } = await supabase.from('push_subscriptions').select('endpoint, p256dh, auth_key, user_id').in('user_id', userIds.slice(i, i + 100));
-    subs.push(...((data ?? []) as Sub[]));
-  }
+  const subs = await subscriptionsOf([...byUser.keys()]);
 
   let users = 0, devices = 0, deadlines = 0;
   for (const [userId, list] of byUser) {
@@ -260,10 +323,10 @@ Deno.serve(async (request) => {
     return json({ error: 'Invalid request.' }, 400);
   }
 
-  if (body.action === 'run') {
+  if (body.action === 'run' || body.action === 'soon') {
     if (!CRON_SECRET || request.headers.get('x-cron-secret') !== CRON_SECRET) return json({ error: 'Not allowed.' }, 401);
     try {
-      return json(await runReminders());
+      return json(body.action === 'run' ? await runReminders() : await runSoon());
     } catch (error) {
       return json({ error: String((error as { message?: string })?.message ?? error) }, 500);
     }

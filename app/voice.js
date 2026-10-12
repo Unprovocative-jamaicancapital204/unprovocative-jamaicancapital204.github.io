@@ -53,9 +53,11 @@ var KEYWORDS = [
 // Füllwörter, die nicht in den Titel gehören (mehrteilige zuerst)
 var FILLERS = [
   "hey livo", "hallo livo", "livo", "erinnere mich bitte", "erinnere mich", "erinner mich",
+  "am nachmittag", "am abend", "am vormittag", "am morgen",
   "daran dass", "an die", "an den", "an das", "bitte", "daran", "dass", "an", "mein", "meine",
   "meinen", "meinem", "meiner", "der", "die", "das", "den", "dem", "läuft ab", "läuft", "ab",
-  "ist", "wird", "fällig", "gültig", "bis", "am", "im", "um", "zum", "spätestens", "noch", "und", "uhr"
+  "ist", "wird", "fällig", "gültig", "bis", "am", "im", "um", "zum", "spätestens", "noch", "und", "uhr",
+  "nachmittags", "abends", "morgens", "vormittags"
 ];
 
 function norm(s) { return String(s).replace(/[,;!?„“"()]/g, " ").replace(/\s+/g, " ").trim(); }
@@ -92,9 +94,25 @@ function extract(text) {
     orig = orig.slice(0, i) + " " + orig.slice(i + match.length);
   }
 
-  // Uhrzeit zuerst, damit "um 10 Uhr" nicht als Datum gelesen wird
-  m = low.match(/ (?:um |ab |gegen )?(\d{1,2})(?:[:.](\d{2}))? ?uhr(?= )/) || low.match(/ um (\d{1,2})[:.](\d{2})(?= )/) || low.match(/ um (\d{1,2})(?= )/);
-  if (m && +m[1] < 24) { time = pad(+m[1]) + ":" + (m[2] || "00"); cut(m[0]); }
+  // Uhrzeit zuerst, damit "um 10 Uhr" nicht als Datum gelesen wird.
+  // Stunde als Zahl oder Wort ("um drei"); "halb 4" = 3:30, "viertel nach 3" = 3:15, "viertel vor 4" = 3:45.
+  var H = "(\\d{1,2}|" + NUM_RE + ")", AT = " (?:um |ab |gegen )?";
+  var hour = null, minute = 0, padded = false;
+  function hourOf(s) { return /\d/.test(s) ? +s : NUMS[s]; }
+  if ((m = low.match(new RegExp(AT + "halb " + H + "(?: uhr)?(?= )")))) { hour = hourOf(m[1]) - 1; minute = 30; }
+  else if ((m = low.match(new RegExp(AT + "viertel nach " + H + "(?: uhr)?(?= )")))) { hour = hourOf(m[1]); minute = 15; }
+  else if ((m = low.match(new RegExp(AT + "viertel vor " + H + "(?: uhr)?(?= )")))) { hour = hourOf(m[1]) - 1; minute = 45; }
+  else if ((m = low.match(/ (?:um |ab |gegen )?(\d{1,2})(?:[:.](\d{2}))? ?uhr(?= )/) || low.match(/ (?:um|ab|gegen) (\d{1,2})[:.](\d{2})(?= )/) ||
+            low.match(new RegExp(" (?:um|gegen) " + H + "(?: uhr)?(?= )")))) {
+    hour = hourOf(m[1]); minute = m[2] ? +m[2] : 0; padded = /^0\d/.test(m[1]);
+  }
+  if (m && hour !== null && hour >= 0 && hour < 24 && minute < 60) {
+    cut(m[0]);
+    // Wie man spricht: "um 3" ist nachmittags, "um 9" vormittags - außer man sagt es dazu
+    if (hour < 12 && / (nachmittags?|abends?|am nachmittag|am abend)(?= )/.test(low)) hour += 12;
+    else if (hour >= 1 && hour <= 6 && !padded && !/ (morgens|früh|vormittags?|am vormittag|am morgen|nachts)(?= )/.test(low)) hour += 12;
+    time = pad(hour) + ":" + pad(minute);
+  }
 
   function first(re, fn) {
     if (date) return;

@@ -18,16 +18,20 @@ var trialStarted = null; // "JJJJ-MM-TT" oder null = Testphase noch nicht begonn
 /* ---------- Speicher ---------- */
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
 
+var TIME_ZONE = (function () { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || "Europe/Berlin"; } catch (e) { return "Europe/Berlin"; } })();
+
 function toRow(it) {
   return {
     tpl: it.tpl || "eigene", title: it.title, due: it.due, due_time: it.time || null,
-    every_months: it.every || 0, from_done: it.from === "done", lead_days: it.lead, renew: !!it.renew
+    every_months: it.every || 0, from_done: it.from === "done", lead_days: it.lead, renew: !!it.renew,
+    remind_min: it.time && it.remindMin ? it.remindMin : null, tz: TIME_ZONE
   };
 }
 function fromRow(r) {
   return {
     id: r.id, tpl: r.tpl, title: r.title, due: r.due, time: r.due_time ? r.due_time.slice(0, 5) : "",
-    every: r.every_months, from: r.from_done ? "done" : "due", lead: r.lead_days, renew: r.renew
+    every: r.every_months, from: r.from_done ? "done" : "due", lead: r.lead_days, renew: r.renew,
+    remindMin: r.remind_min || 0
   };
 }
 async function signIn() {
@@ -354,13 +358,37 @@ function readLead(form, def) {
   var n = parseInt(form.elements.lead.value, 10);
   return isNaN(n) || n < 0 ? def : n;
 }
+// Uhrzeit und "kurz vorher erinnern" - die Auswahl erscheint erst, wenn eine Uhrzeit drin ist.
+// remindMin: undefined = neue Frist (Vorschlag 15 Min.), 0 = ausdrücklich keine.
+var SOON_OPTIONS = [[5, "5 Minuten vorher"], [15, "15 Minuten vorher"], [30, "30 Minuten vorher"], [60, "1 Stunde vorher"], [120, "2 Stunden vorher"], [0, "Nein"]];
+var SOON_DEFAULT = 15;
+function timeHTML(time, remindMin) {
+  var selected = remindMin == null ? SOON_DEFAULT : remindMin;
+  return '<label class="field"><span>Uhrzeit <i>(optional)</i></span><input name="time" type="time" value="' + esc(time || "") + '"></label>' +
+    '<label class="field" id="soonField"' + (time ? "" : " hidden") + '><span>Kurz vorher erinnern</span><select name="soon">' +
+    SOON_OPTIONS.map(function (o) {
+      return '<option value="' + o[0] + '"' + (o[0] === selected ? " selected" : "") + '>' + o[1] + '</option>';
+    }).join("") + '</select></label>';
+}
+function wireTime(form) {
+  form.elements.time.addEventListener("input", function () {
+    document.getElementById("soonField").hidden = !form.elements.time.value;
+  });
+}
+function readSoon(form) {
+  return form.elements.time.value ? (parseInt(form.elements.soon.value, 10) || 0) : 0;
+}
+function soonText(min) {
+  return min >= 60 ? (min / 60) + (min === 60 ? " Stunde" : " Stunden") + " vorher" : min + " Minuten vorher";
+}
+
 function itemFormHTML(it, opts) {
   var list = EVERY_OPTIONS.slice();
   if (!list.some(function (o) { return o[0] === it.every; })) list.push([it.every, everyText(it.every)]);
   return '<form id="frm" novalidate>' + (opts.intro || "") +
     '<label class="field"><span>Was?</span><input name="title" type="text" value="' + esc(it.title) + '"></label>' +
     '<label class="field"><span>' + (opts.dateLabel || "Fällig am") + '</span><input name="due" type="date" value="' + esc(it.due) + '"></label>' +
-    '<label class="field"><span>Uhrzeit <i>(optional)</i></span><input name="time" type="time" value="' + esc(it.time || "") + '"></label>' +
+    timeHTML(it.time, it.remindMin) +
     '<label class="field"><span>Wiederholung</span><select name="every">' + list.map(function (o) {
       return '<option value="' + o[0] + '"' + (o[0] === it.every ? " selected" : "") + '>' + esc(o[1]) + '</option>';
     }).join("") + '</select></label>' +
@@ -377,6 +405,7 @@ function readItemForm(form, it) {
   it.title = title;
   it.due = due;
   it.time = form.elements.time.value || "";
+  it.remindMin = readSoon(form);
   it.every = parseInt(form.elements.every.value, 10) || 0;
   it.lead = readLead(form, it.lead);
   return true;
@@ -392,6 +421,7 @@ function showDraft(d, said) {
       back: '<button class="btn light" type="button" data-act="voice">Nochmal sagen</button>'
     }));
   var form = document.getElementById("frm");
+  wireTime(form);
   form.addEventListener("submit", function (e) {
     e.preventDefault();
     if (!readItemForm(form, d)) return;
@@ -450,17 +480,21 @@ function showNew(tid) {
   openSheet('<h3>' + find(CATEGORIES, t.cat).icon + " " + esc(t.title) + '</h3><form id="frm" novalidate>' +
     (t.hint ? '<p class="hint">' + esc(t.hint) + '</p>' : "") +
     t.fields.map(fieldHTML).join("") +
-    '<label class="field"><span>Uhrzeit <i>(optional)</i></span><input name="time" type="time"></label>' +
+    timeHTML("", undefined) +
     leadHTML(t.lead) +
     '<div class="preview" id="pv"></div><p class="err" id="err"></p>' +
     '<button class="btn" type="submit">Speichern</button>' +
     '<button class="btn light" type="button" data-act="add">Zurück</button></form>');
 
   var form = document.getElementById("frm");
+  wireTime(form);
   // Frist aus den Feldern der Vorlage plus der (freiwilligen) Uhrzeit
   function current() {
     var it = build(t, readValues(form, t), readLead(form, t.lead));
-    if (it) it.time = form.elements.time.value || "";
+    if (it) {
+      it.time = form.elements.time.value || "";
+      it.remindMin = readSoon(form);
+    }
     return it;
   }
   function update() {
@@ -489,6 +523,7 @@ function showItem(id) {
     '<span class="pill">' + whenText(s.days) + '</span></div></div>' +
     '<dl><dt>Fällig am</dt><dd>' + dueText(it) + '</dd>' +
     '<dt>Erinnerung</dt><dd>' + it.lead + ' Tage vorher (' + remindText(it) + ')</dd>' +
+    (it.time && it.remindMin ? '<dt>Kurz vorher</dt><dd>' + soonText(it.remindMin) + '</dd>' : "") +
     '<dt>Wiederholung</dt><dd>' + everyText(it.every) + '</dd></dl>' +
     (t && t.hint ? '<p class="hint">' + esc(t.hint) + '</p>' : "") +
     (canEdit()
@@ -533,6 +568,7 @@ function showEdit(id, renewing) {
       back: '<button class="btn light" type="button" data-open="' + it.id + '">Zurück</button>'
     }));
   var form = document.getElementById("frm");
+  wireTime(form);
   form.addEventListener("submit", function (e) {
     e.preventDefault();
     var before = Object.assign({}, it);
