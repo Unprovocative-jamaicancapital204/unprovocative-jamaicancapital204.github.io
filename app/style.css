@@ -33,7 +33,21 @@ body.lock { overflow: hidden; }
 .top { position: sticky; top: 0; z-index: 5; background: rgba(245,247,251,.92); backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
 .topbar { display: flex; align-items: center; justify-content: space-between; }
 .brand { display: flex; align-items: center; gap: 8px; height: 58px; }
-.langsel { padding: 6px 8px; border: 1px solid var(--line); border-radius: 10px; background: #fff; color: var(--ink); font: inherit; font-size: 14px; }
+/* Sprache: Knopf "🌐 DE ▾" mit Scroll-Liste (zeigt etwa 6 von 10 Sprachen) */
+.langdd { position: relative; }
+.langbtn { display: flex; align-items: center; gap: 5px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 12px; background: #fff; color: var(--ink); font: inherit; font-size: 14px; font-weight: 800; cursor: pointer; }
+.langbtn[aria-expanded="true"] { border-color: #c7d4ff; background: var(--brand-soft); color: var(--brand); }
+.langbtn svg { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.langbtn .chev { width: 13px; height: 13px; color: var(--muted); transition: transform .15s; }
+.langbtn[aria-expanded="true"] .chev { transform: rotate(180deg); }
+.langlist { position: absolute; right: 0; top: calc(100% + 8px); z-index: 40; width: 210px; max-height: min(290px, 60vh); overflow-y: auto; overscroll-behavior: contain; margin: 0; padding: 6px; list-style: none; border: 1px solid var(--line); border-radius: 16px; background: #fff; box-shadow: 0 24px 48px -20px rgba(15,23,42,.35); scrollbar-width: thin; scrollbar-color: #cdd6ee transparent; }
+.langlist[hidden] { display: none; }
+.langlist::-webkit-scrollbar { width: 6px; }
+.langlist::-webkit-scrollbar-thumb { border-radius: 3px; background: #cdd6ee; }
+.langlist button { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 11px 12px; border: 0; border-radius: 10px; background: none; color: var(--ink); font: inherit; font-size: 15px; text-align: left; cursor: pointer; }
+.langlist button:hover { background: var(--later-bg); }
+.langlist [aria-selected] button { background: var(--brand-soft); color: var(--brand); font-weight: 700; }
+.langlist [aria-selected] button::after { content: "✓"; }
 .brand img { width: 34px; height: 34px; }
 .wm { font-size: 23px; font-weight: 800; letter-spacing: -.03em; color: var(--ink); }
 .wm span { background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; }

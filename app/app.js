@@ -689,15 +689,31 @@ function seedDemo() {
   add("reisepass", { date: toISO(addMonths(t0, 26)) });
 }
 
-/* ---------- Sprache oben rechts ---------- */
+/* ---------- Sprache oben rechts: eigenes Aufklappmenü mit Scroll-Liste ---------- */
 function setupLanguage() {
-  var sel = document.getElementById("langSel");
-  if (!sel) return;
-  sel.setAttribute("aria-label", t("lang"));
-  sel.innerHTML = Object.keys(LANGS).map(function (code) {
-    return '<option value="' + code + '"' + (code === LANG ? " selected" : "") + '>' + esc(LANGS[code]) + '</option>';
+  var btn = document.getElementById("langBtn"), list = document.getElementById("langList");
+  if (!btn || !list) return;
+  btn.setAttribute("aria-label", t("lang"));
+  document.getElementById("langCode").textContent = LANG.toUpperCase();
+  list.innerHTML = Object.keys(LANGS).map(function (code) {
+    return '<li role="option"' + (code === LANG ? ' aria-selected="true"' : "") + '><button type="button" data-lang="' + code + '" lang="' + code + '">' + esc(LANGS[code]) + '</button></li>';
   }).join("");
-  sel.addEventListener("change", function () { setLang(sel.value); });
+  function open(yes) {
+    list.hidden = !yes;
+    btn.setAttribute("aria-expanded", yes ? "true" : "false");
+    // aktuelle Sprache gleich sichtbar machen (ohne die Seite zu verschieben)
+    var cur = yes && list.querySelector("[aria-selected] button");
+    if (cur) list.scrollTop = Math.max(0, cur.offsetTop - list.clientHeight / 2 + cur.offsetHeight / 2);
+  }
+  btn.addEventListener("click", function () { open(list.hidden); });
+  list.addEventListener("click", function (e) {
+    var b = e.target.closest("[data-lang]");
+    if (!b) return;
+    if (b.getAttribute("data-lang") === LANG) open(false);
+    else setLang(b.getAttribute("data-lang"));
+  });
+  document.addEventListener("click", function (e) { if (!list.hidden && !e.target.closest("#langDd")) open(false); });
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape") open(false); });
   document.querySelector(".fab").setAttribute("aria-label", t("add"));
   document.getElementById("brand").href = LANG === "de" ? "../" : "../en/";
 }

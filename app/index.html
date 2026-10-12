@@ -11,14 +11,17 @@
 <link rel="apple-touch-icon" href="../apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="heylivo">
-<link rel="stylesheet" href="style.css?v=11">
+<link rel="stylesheet" href="style.css?v=12">
 </head>
 <body>
 
 <header class="top">
   <div class="wrap topbar">
     <a class="brand" id="brand" href="../"><img src="../icon.png" alt=""><span class="wm">hey<span>livo</span></span></a>
-    <select id="langSel" class="langsel"></select>
+    <div class="langdd" id="langDd">
+      <button type="button" class="langbtn" id="langBtn" aria-haspopup="listbox" aria-expanded="false"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg><span id="langCode"></span><svg class="chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button>
+      <ul class="langlist" id="langList" role="listbox" hidden></ul>
+    </div>
   </div>
 </header>
 
@@ -32,11 +35,11 @@
 <section class="sheet" id="sheet" hidden></section>
 <div class="toast" id="toast" hidden></div>
 
-<script src="i18n.js?v=11"></script>
-<script src="vendor/supabase.js?v=11"></script>
-<script src="templates.js?v=11"></script>
-<script src="voice.js?v=11"></script>
-<script src="push.js?v=11"></script>
-<script src="app.js?v=11"></script>
+<script src="i18n.js?v=12"></script>
+<script src="vendor/supabase.js?v=12"></script>
+<script src="templates.js?v=12"></script>
+<script src="voice.js?v=12"></script>
+<script src="push.js?v=12"></script>
+<script src="app.js?v=12"></script>
 </body>
 </html>
