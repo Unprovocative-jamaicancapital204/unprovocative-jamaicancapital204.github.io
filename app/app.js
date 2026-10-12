@@ -14,6 +14,10 @@ var sb = DEMO ? null : window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 var items = [];
 var plusUntil = null;
 var trialStarted = null; // "JJJJ-MM-TT" oder null = Testphase noch nicht begonnen
+var userId = "";         // Konto dieses Browsers - geht beim Kauf als client_reference_id an Stripe
+// Stripe-Zahlungslink für Livo Plus (11,99 € inkl. MwSt., 1 Jahr, ohne Verlängerung).
+// Leer = Kauf noch nicht freigeschaltet ("kommt bald"). Der Webhook stripe-webhook schaltet frei.
+var PLUS_LINK = "";
 
 /* ---------- Speicher ---------- */
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
@@ -36,9 +40,10 @@ function fromRow(r) {
 }
 async function signIn() {
   var s = await sb.auth.getSession();
-  if (s.data.session) return;
+  if (s.data.session) { userId = s.data.session.user.id; return; }
   var r = await sb.auth.signInAnonymously();
   if (r.error) throw r.error;
+  userId = r.data.user.id;
 }
 async function loadAll() {
   var r = await sb.from("deadlines").select("*").order("due");
@@ -80,7 +85,7 @@ function canEdit() {
 }
 function errText(e) {
   return e && e.message === "trial_over"
-    ? "Deine " + TRIAL_DAYS + " Tage Testphase sind vorbei. Mit Livo Plus für 19,99 € im Jahr geht es weiter."
+    ? "Deine " + TRIAL_DAYS + " Tage Testphase sind vorbei. Mit Livo Plus für 11,99 € im Jahr geht es weiter."
     : "Das Speichern hat nicht geklappt. Bitte prüf deine Internetverbindung und versuch es nochmal.";
 }
 
@@ -592,12 +597,32 @@ async function removeItem(id) {
 // Livo Plus: Angebot, und nach der Testphase der Hinweis statt Formular
 function showPlus() {
   var over = !canEdit();
-  openSheet('<h3>' + (over ? "Deine " + TRIAL_DAYS + " Tage Testphase sind vorbei" : "Livo Plus") + '</h3>' +
-    '<p class="hint"><b>Livo Plus – 19,99 € im Jahr</b> (etwa 1,67 € im Monat)<br>' +
+  var buyUrl = PLUS_LINK && userId && !DEMO
+    ? PLUS_LINK + "?client_reference_id=" + encodeURIComponent(userId) + "&locale=de" : "";
+  openSheet('<h3>' + (over ? "Deine " + TRIAL_DAYS + " Tage Testphase sind vorbei" : isPlus() ? "Livo Plus ist aktiv" : "Livo Plus") + '</h3>' +
+    (isPlus() ? '<p class="muted">Aktiv bis <b>' + fmt(fromISO(plusUntil)) + '</b>. Ein weiterer Kauf verlängert um ein Jahr ab diesem Datum.</p>' : "") +
+    '<p class="hint"><b>Livo Plus – 11,99 € inkl. MwSt. für 1 Jahr</b> (weniger als 1 € im Monat)<br>' +
     '✓ Unbegrenzt viele Fristen<br>✓ Erinnerungen aufs Handy<br>✓ Eintragen per Sprache: „Hey Livo …“<br>✓ Erledigen, ändern, erneuern</p>' +
     (over ? '<p class="muted">Deine bisherigen Fristen bleiben erhalten und du kannst sie weiter ansehen.</p>' : "") +
-    '<button type="button" class="btn" disabled>Livo Plus kommt bald</button>' +
+    (buyUrl
+      ? '<a class="btn" href="' + esc(buyUrl) + '">' + (isPlus() ? "Um 1 Jahr verlängern – 11,99 €" : "Livo Plus kaufen – 11,99 €") + '</a>' +
+        '<p class="legal">Einmalzahlung, verlängert sich nicht automatisch. Livo Plus gilt für die Fristen in diesem Browser. ' +
+        'Es gelten unsere <a href="../agb.html" target="_blank">AGB</a> (mit Widerrufsbelehrung) und die <a href="../datenschutz.html" target="_blank">Datenschutzerklärung</a>. ' +
+        'Bezahlt wird sicher über Stripe.</p>'
+      : '<button type="button" class="btn" disabled>Livo Plus kommt bald</button>') +
     '<button type="button" class="btn light" data-act="close">OK</button>');
+}
+
+// Rückkehr von Stripe (?plus=danke): kurz warten, bis der Webhook Plus eingetragen hat
+async function afterPurchase() {
+  history.replaceState(null, "", location.pathname);
+  toast("Danke! Livo Plus wird freigeschaltet …");
+  for (var i = 0; i < 10 && !isPlus(); i++) {
+    await new Promise(function (resolve) { setTimeout(resolve, 2000); });
+    try { await loadAll(); } catch (e) { /* nächster Versuch */ }
+  }
+  render();
+  toast(isPlus() ? "Livo Plus ist aktiv bis " + fmt(fromISO(plusUntil)) + " ✓" : "Die Zahlung ist da – Plus erscheint gleich. Lade die Seite in einer Minute neu.");
 }
 
 /* ---------- Kurze Meldung ---------- */
@@ -683,6 +708,7 @@ async function start() {
   render();
   // Erinnerungen im Hintergrund vorbereiten - die Liste wartet nie darauf
   if (!DEMO) initPush().then(render, render);
+  if (!DEMO && params.get("plus") === "danke") afterPurchase();
   var show = params.get("show") || "";
   if (params.get("say")) understand(params.get("say"));
   else if (show === "add") showPicker();

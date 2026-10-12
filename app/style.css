@@ -106,6 +106,9 @@ main { padding-bottom: 110px; }
 .btn:hover { background: var(--brand-dark); }
 .btn.light { margin-top: 8px; background: var(--later-bg); color: var(--ink); }
 .btn.danger { margin-top: 4px; background: none; color: var(--late); }
+a.btn { text-align: center; text-decoration: none; }
+.legal { margin: 8px 2px 4px; color: var(--muted); font-size: 12px; line-height: 1.45; }
+.legal a { color: var(--brand); }
 .d-head { display: flex; align-items: center; gap: 12px; margin: 4px 0 14px; }
 .d-head h3 { margin: 0 0 4px; }
 .d-head .pill { display: inline-block; }
