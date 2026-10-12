@@ -1,20 +1,72 @@
-// Livo – Prototyp. Fristen werden nur in diesem Browser gespeichert
-// (localStorage); Anmeldung, Supabase und Push-Erinnerungen kommen mit Version 1.
-// URL-Parameter zum Testen: ?demo=1 lädt Beispiel-Fristen,
+// heylivo – Fristen in Supabase. Ohne Anmeldung bekommt jeder Browser ein
+// anonymes Konto; die Datenbank (RLS) zeigt jedem nur seine eigenen Fristen.
+// URL-Parameter zum Testen: ?demo=1 zeigt Beispiel-Fristen (wird nicht gespeichert),
 // &show=add | voice | form:<vorlage> | item öffnet direkt das passende Blatt,
 // &say=<Satz> verarbeitet einen Satz so, als wäre er gesprochen worden.
 
-var STORE_KEY = "livo.items.v1";
-var items = load();
+var SUPABASE_URL = "https://fkhngrvqxlpqxpllrnoj.supabase.co";
+var SUPABASE_KEY = "sb_publishable_Ya83flK2efxCxi1WecSCwA_wbC_njXD"; // öffentlicher Schlüssel, darf im Code stehen
+var FREE_LIMIT = 5;
+
+var params = new URLSearchParams(location.search);
+var DEMO = params.get("demo") === "1";
+var sb = DEMO ? null : window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+var items = [];
+var plusUntil = null;
 
 /* ---------- Speicher ---------- */
-function load() {
-  try { return JSON.parse(localStorage.getItem(STORE_KEY)) || []; } catch (e) { return []; }
-}
-function save() {
-  try { localStorage.setItem(STORE_KEY, JSON.stringify(items)); } catch (e) {}
-}
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+
+function toRow(it) {
+  return {
+    tpl: it.tpl || "eigene", title: it.title, due: it.due, due_time: it.time || null,
+    every_months: it.every || 0, from_done: it.from === "done", lead_days: it.lead, renew: !!it.renew
+  };
+}
+function fromRow(r) {
+  return {
+    id: r.id, tpl: r.tpl, title: r.title, due: r.due, time: r.due_time ? r.due_time.slice(0, 5) : "",
+    every: r.every_months, from: r.from_done ? "done" : "due", lead: r.lead_days, renew: r.renew
+  };
+}
+async function signIn() {
+  var s = await sb.auth.getSession();
+  if (s.data.session) return;
+  var r = await sb.auth.signInAnonymously();
+  if (r.error) throw r.error;
+}
+async function loadAll() {
+  var r = await sb.from("deadlines").select("*").order("due");
+  if (r.error) throw r.error;
+  items = r.data.map(fromRow);
+  var p = await sb.from("plans").select("plus_until").maybeSingle();
+  plusUntil = p.data ? p.data.plus_until : null;
+}
+async function addItem(it) {
+  if (DEMO) { it.id = uid(); items.push(it); return; }
+  var r = await sb.from("deadlines").insert(toRow(it)).select().single();
+  if (r.error) throw r.error;
+  items.push(fromRow(r.data));
+}
+async function updateItem(it) {
+  if (DEMO) return;
+  var r = await sb.from("deadlines").update(toRow(it)).eq("id", it.id);
+  if (r.error) throw r.error;
+}
+async function deleteItem(id) {
+  if (!DEMO) {
+    var r = await sb.from("deadlines").delete().eq("id", id);
+    if (r.error) throw r.error;
+  }
+  items = items.filter(function (x) { return x.id !== id; });
+}
+function isPlus() { return !!plusUntil && plusUntil >= toISO(today()); }
+function limitReached() { return !DEMO && !isPlus() && items.length >= FREE_LIMIT; }
+function errText(e) {
+  return e && e.message === "free_limit"
+    ? "Gratis sind bis zu " + FREE_LIMIT + " Fristen möglich. Mit Livo Plus für 19,99 € im Jahr unbegrenzt – kommt bald."
+    : "Das Speichern hat nicht geklappt. Bitte prüf deine Internetverbindung und versuch es nochmal.";
+}
 
 /* ---------- Datum: immer lokale Mitternacht, gespeichert als JJJJ-MM-TT ---------- */
 function pad(n) { return (n < 10 ? "0" : "") + n; }
@@ -254,11 +306,24 @@ function showDraft(d, said) {
   form.addEventListener("submit", function (e) {
     e.preventDefault();
     if (!readItemForm(form, d)) return;
-    d.id = uid();
-    items.push(d);
-    save(); closeSheet(); render();
-    toast("Gespeichert ✓ Erinnerung " + remindText(d));
+    saving(form, addItem(d), "Gespeichert ✓ Erinnerung " + remindText(d));
   });
+}
+
+// Wartet auf das Speichern; bei Erfolg Blatt zu, sonst Fehler im Formular
+async function saving(form, promise, okText) {
+  var btn = form.querySelector("[type=submit]");
+  btn.disabled = true;
+  btn.textContent = "Speichert …";
+  try {
+    await promise;
+    closeSheet(); render();
+    toast(okText);
+  } catch (err) {
+    document.getElementById("err").textContent = errText(err);
+    btn.disabled = false;
+    btn.textContent = "Speichern";
+  }
 }
 
 /* ---------- Neue Frist aus einer Vorlage ---------- */
@@ -312,10 +377,7 @@ function showNew(tid) {
     e.preventDefault();
     var it = build(t, readValues(form, t), readLead(form, t.lead));
     if (!it) { document.getElementById("err").textContent = "Bitte fülle die Pflichtfelder mit einem gültigen Datum aus."; return; }
-    it.id = uid();
-    items.push(it);
-    save(); closeSheet(); render();
-    toast("Gespeichert ✓ Erinnerung " + remindText(it));
+    saving(form, addItem(it), "Gespeichert ✓ Erinnerung " + remindText(it));
   });
   update();
 }
@@ -337,21 +399,27 @@ function showItem(id) {
     '<button type="button" class="btn danger" data-act="del" data-id="' + it.id + '">Löschen</button></div>');
 }
 
-function markDone(id) {
+async function markDone(id) {
   var it = find(items, id);
   if (!it) return;
-  if (it.every > 0) {
-    var next = addMonths(it.from === "done" ? today() : fromISO(it.due), it.every);
-    while (next <= today()) next = addMonths(next, it.every);
-    it.due = toISO(next);
-    save(); closeSheet(); render();
-    toast("Erledigt ✓ Nächster Termin: " + fmt(next));
-  } else if (it.renew) {
-    showEdit(id, true);
-  } else {
-    items = items.filter(function (x) { return x.id !== id; });
-    save(); closeSheet(); render();
-    toast("Erledigt ✓");
+  try {
+    if (it.every > 0) {
+      var next = addMonths(it.from === "done" ? today() : fromISO(it.due), it.every);
+      while (next <= today()) next = addMonths(next, it.every);
+      var old = it.due;
+      it.due = toISO(next);
+      try { await updateItem(it); } catch (e) { it.due = old; throw e; }
+      closeSheet(); render();
+      toast("Erledigt ✓ Nächster Termin: " + fmt(next));
+    } else if (it.renew) {
+      showEdit(id, true);
+    } else {
+      await deleteItem(id);
+      closeSheet(); render();
+      toast("Erledigt ✓");
+    }
+  } catch (e) {
+    toast(errText(e));
   }
 }
 
@@ -368,17 +436,29 @@ function showEdit(id, renewing) {
   var form = document.getElementById("frm");
   form.addEventListener("submit", function (e) {
     e.preventDefault();
+    var before = Object.assign({}, it);
     if (!readItemForm(form, it)) return;
-    save(); closeSheet(); render();
-    toast("Gespeichert ✓");
+    saving(form, updateItem(it).catch(function (err) { Object.assign(it, before); throw err; }), "Gespeichert ✓");
   });
 }
 
-function removeItem(id) {
+async function removeItem(id) {
   var it = find(items, id);
   if (!it || !confirm("„" + it.title + "“ wirklich löschen?")) return;
-  items = items.filter(function (x) { return x.id !== id; });
-  save(); closeSheet(); render();
+  try {
+    await deleteItem(id);
+    closeSheet(); render();
+  } catch (e) {
+    toast(errText(e));
+  }
+}
+
+// Gratis-Grenze erreicht: freundlicher Hinweis statt Formular
+function showLimit() {
+  openSheet('<h3>Du hast schon ' + FREE_LIMIT + ' Fristen im Blick 🎉</h3>' +
+    '<p class="hint">Gratis sind bis zu ' + FREE_LIMIT + ' Fristen möglich. Mit <b>Livo Plus</b> für 19,99 € im Jahr behältst du unbegrenzt viele im Blick – mit mehreren Erinnerungen pro Frist und für die ganze Familie. Livo Plus kommt bald.</p>' +
+    '<p class="muted">Bis dahin kannst du erledigte Fristen löschen, um Platz zu machen.</p>' +
+    '<button type="button" class="btn light" data-act="close">OK</button>');
 }
 
 /* ---------- Kurze Meldung ---------- */
@@ -395,9 +475,11 @@ function toast(msg) {
 document.addEventListener("click", function (e) {
   var el = e.target.closest("[data-act],[data-open],[data-tpl]");
   if (!el) return;
-  if (el.hasAttribute("data-tpl")) return showNew(el.getAttribute("data-tpl"));
   if (el.hasAttribute("data-open")) return showItem(el.getAttribute("data-open"));
   var act = el.getAttribute("data-act"), id = el.getAttribute("data-id");
+  // Neue Frist anlegen geht nur unter der Gratis-Grenze
+  if ((el.hasAttribute("data-tpl") || act === "add" || act === "voice") && limitReached()) return showLimit();
+  if (el.hasAttribute("data-tpl")) return showNew(el.getAttribute("data-tpl"));
   if (act === "add") showPicker();
   else if (act === "voice") showVoice();
   else if (act === "close") closeSheet();
@@ -426,15 +508,33 @@ function seedDemo() {
   add("tuev", { month: toISO(addMonths(t, 7)).slice(0, 7) });
   add("steuer", {});
   add("reisepass", { date: toISO(addMonths(t, 26)) });
-  save();
 }
 
-var params = new URLSearchParams(location.search);
-if (params.get("demo") === "1") seedDemo();
-render();
-var show = params.get("show") || "";
-if (params.get("say")) understand(params.get("say"));
-else if (show === "add") showPicker();
-else if (show === "voice") showVoice();
-else if (show.indexOf("form:") === 0) showNew(show.slice(5));
-else if (show === "item" && items.length) showItem(sortedItems()[0].id);
+/* ---------- Start ---------- */
+async function start() {
+  var list = document.getElementById("list");
+  document.getElementById("note").textContent = DEMO
+    ? "Demo mit Beispiel-Fristen – hier wird nichts gespeichert."
+    : "Beta: Deine Fristen werden sicher gespeichert – ohne Anmeldung, in diesem Browser. Push-Erinnerungen kommen als Nächstes.";
+  if (DEMO) {
+    seedDemo();
+  } else {
+    list.innerHTML = '<p class="loading">Lädt …</p>';
+    try {
+      await signIn();
+      await loadAll();
+    } catch (e) {
+      list.innerHTML = '<p class="offline">Keine Verbindung. Bitte prüf dein Internet und lade die Seite neu.</p>';
+      return;
+    }
+    try { localStorage.removeItem("livo.items.v1"); } catch (e) {} // Fristen aus dem ersten Prototyp
+  }
+  render();
+  var show = params.get("show") || "";
+  if (params.get("say")) understand(params.get("say"));
+  else if (show === "add") showPicker();
+  else if (show === "voice") showVoice();
+  else if (show.indexOf("form:") === 0) showNew(show.slice(5));
+  else if (show === "item" && items.length) showItem(sortedItems()[0].id);
+}
+start();
